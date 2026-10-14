@@ -1,0 +1,13 @@
+/build/
+/build-*/
+/validation/
+/.cache/
+/.vs/
+*.user
+*.suo
+*.log
+.env
+.env.*
+!.env.example
+Thumbs.db
+.DS_Store
