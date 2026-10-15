@@ -1,5 +1,10 @@
 # Directory Open — instruções de desenvolvimento
 
+O nome definitivo é **Directory Open**, forma curta **DirOpen** e executável
+**DirOpen.exe**. O nome antigo fica restrito a referências históricas e identificadores
+técnicos de compatibilidade. Se CONTEXTO.md local estiver presente, leia-o primeiro
+para retomar o estado atual; não o inclua em commits ou publicações.
+
 Aplicativo próprio para Windows em C++20/Qt Widgets. Consultar README.md,
 docs/COMPILAR.md, docs/ARQUITETURA.md e CONTRIBUTING.md conforme o escopo.
 Preservar recursos existentes, dados reais e compatibilidade de sessão/clipboard.
