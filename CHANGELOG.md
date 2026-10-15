@@ -1,5 +1,19 @@
 # Histórico do Directory Open
 
+## 0.11.0 — renomeação em lote e áudio/vídeo
+
+- Prévia de renomeação (Ctrl+F2) com modelo, numeração, substituição literal e datas
+  de modificação/criação/escolhidas; preservação opcional da última extensão.
+- Ordem do lote acompanha a apresentação; exclusão de linhas, confirmação explícita,
+  conflitos/nomes inválidos bloqueantes e revalidação de identidade antes de aplicar.
+- Motor nativo sem substituir destinos, trabalho em segundo plano, cancelamento
+  parcial e resultado por item; sem desfazer automático ou resolução de ciclos.
+- Áudio/vídeo no mesmo visualizador F7/F3/F11: reproduzir/pausar, parar, posição,
+  volume e silêncio. Sem autoplay; Anterior/Próximo conserva a navegação do painel.
+- Backend/dispositivo liberados ao trocar/ocultar/fechar e antes de mudar a origem.
+  Qt Multimedia é requisito de build; formatos/codecs dependem do runtime distribuído.
+
+
 ## 0.10.0 — comparação de pastas
 
 - Comparar as pastas dos dois painéis por tamanho/data ou por bytes, com inclusão

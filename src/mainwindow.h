@@ -59,6 +59,8 @@ private:
     QAction *m_copyAction = nullptr;
     QAction *m_moveAction = nullptr;
     QAction *m_renameAction = nullptr;
+    QAction *m_batchRenameAction = nullptr;
+    void startBatchRename();
     QAction *m_folderAction = nullptr;
     QAction *m_trashAction = nullptr;
     QAction *m_cancelOperation = nullptr;

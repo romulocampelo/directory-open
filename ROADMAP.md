@@ -5,8 +5,7 @@ não representa prazo ou promessa de recursos.
 
 ## Próxima etapa funcional
 
-- Renomeação em lote com prévia dos nomes e conflitos, preservando extensão,
-  seleção explícita e resultado por item.
+- Miniaturas de PDF e aprimoramentos de navegação visual.
 
 ## Distribuição inicial
 
@@ -16,11 +15,14 @@ não representa prazo ou promessa de recursos.
 
 ## Etapas posteriores
 
-- Áudio/vídeo no visualizador.
-- Miniaturas de PDF e aprimoramentos de navegação visual.
 - Pesquisa/seleção de texto de PDF, conforme escolha do renderizador.
 - Ampliar a comparação conforme uso real; sincronização exige um fluxo próprio
   de prévia, conflitos e confirmação, sem reaproveitar resultados antigos como prova atual.
+
+## Já entregue na 0.11
+
+Renomeação em lote com prévia e confirmação; reprodução local de áudio/vídeo com
+controles, usando o mesmo visualizador ampliado/tela cheia.
 
 ## Já entregue na 0.10
 

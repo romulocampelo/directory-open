@@ -1,4 +1,4 @@
-# Manual do Directory Open 0.10
+# Manual do Directory Open 0.11
 
 ## Recursos e atalhos
 
@@ -7,7 +7,7 @@
 - Abas com histórico independente e filtros por nome.
 - Voltar, avançar, pasta acima e endereço editável.
 - Tema claro/escuro e alternância entre um ou dois painéis.
-- Visualizador de imagens, texto e PDF, com carregamento em segundo plano.
+- Visualizador de imagens, texto, PDF, áudio e vídeo, com carregamento em segundo plano.
 - Abertura externa explícita pelo botão Abrir; duplo clique em arquivo seleciona
   para pré-visualização, e em pasta navega.
 - Copiar caminho para a área de transferência.
@@ -38,7 +38,7 @@ Ctrl+C copia arquivos, Ctrl+X prepara o recorte e Ctrl+V cola no painel ativo.
 Esses três atalhos só atuam em arquivos quando a lista tem o foco; nos campos
 de texto, mantêm a edição normal. O botão Colar também está na barra de comandos.
 Ctrl+Shift+F abre a busca recursiva; Ctrl+D adiciona a pasta atual aos favoritos.
-Ctrl+Shift+K abre a comparação das pastas dos dois painéis.
+Ctrl+Shift+K abre a comparação das pastas dos dois painéis. Ctrl+F2 abre a renomeação em lote.
 
 ## Visualizar arquivos
 
@@ -67,6 +67,31 @@ fornece os cabeçalhos para compilar. As páginas são imagens: nesta etapa,
 não há seleção/pesquisa de texto de PDF, formulários, links interativos ou entrada de
 senha. PDFs protegidos ou inválidos mostram um aviso. Áudio/vídeo e Office ficam para
 outra etapa.
+
+**Áudio e vídeo:** selecione um arquivo e use F7/F3. Clique em **Reproduzir**;
+a seleção carrega a mídia sem iniciar som ou reprodução. O botão alterna para
+**Pausar**. **Parar** retorna ao início. A barra de posição permite buscar com
+mouse ou teclado quando o arquivo oferece busca; há tempo atual/duração, volume
+e **Silenciar**. Volume/silenciamento permanecem enquanto o visualizador existe.
+Anterior/Próximo continuam seguindo a ordem e o filtro do painel. Não há avanço
+automático no fim da mídia.
+
+F3/Ampliar reutiliza o mesmo reprodutor e F11 alterna tela cheia na janela ampliada;
+fechar essa janela devolve o visualizador ao painel. Trocar de arquivo, ocultar o
+painel ou fechar o aplicativo encerra a reprodução e libera o dispositivo aberto.
+Mover, renomear, enviar à Lixeira e abrir o lote também encerram a mídia antes da
+confirmação; se cancelar a operação, use **Atualizar** para carregar novamente.
+
+A leitura é local, pelo Qt Multimedia, sem carregar o arquivo inteiro em memória.
+Extensões candidatas: WAV, MP3, FLAC, OGG, OPUS, AAC, M4A, WMA, MP4, M4V, MOV,
+MKV, WEBM, AVI, WMV, MPG/MPEG, TS e 3GP. A extensão não garante um codec: um arquivo
+inválido ou sem decodificador mostra o erro no visualizador. WAV PCM e AVI/MJPEG
+foram verificados com fixtures próprias, incluindo quadros efetivamente decodificados.
+Não é uma declaração de suporte a todos os codecs desses contêineres. Não há
+playlists, URLs de streaming, captura, gravação, conversão ou editor de mídia.
+Nenhum pacote externo de codecs é instalado pelo aplicativo.
+
+![Controles de áudio com arquivo demonstrativo](images/audio-preview.png)
 
 **Atualizar** no visualizador relê o arquivo; em PDF, retorna à primeira página.
 A prévia representa uma leitura do arquivo, não um acompanhamento contínuo de edições
@@ -246,6 +271,48 @@ A prechecagem da árvore ocorre na thread de cópia e pode ser cancelada.
 Nome e data de modificação de arquivo foram verificados em fixtures Unicode;
 a preservação de todos os metadados, ACLs e propriedades de arquivos especiais
 não foi validada. Não há rollback próprio nem fila de múltiplos trabalhos.
+
+## Renomear em lote
+
+Selecione os arquivos/pastas de uma mesma pasta e use **Ctrl+F2**, **Renomear em
+lote…** na barra, no menu Ferramentas ou no menu de contexto. F2 continua renomeando
+um único item. Até 1.000 itens e 2 MiB de caminhos UTF-16 por lote; a ordem inicial
+é a ordem visual do painel, independentemente da ordem dos cliques de seleção.
+
+O modelo aceita **{name}** (nome), **{n}** (número) e **{date}** (data). Por exemplo,
+**Viagem_{date}_{n}** produz nomes como Viagem_2027-01-03_001.jpg. Escolha início,
+passo e quantidade mínima de dígitos. **Substituição literal** altera texto do nome
+antes de aplicar o modelo, com distinção de maiúsculas opcional. Conteúdo inserido
+por nome/substituição não volta a ser interpretado como campos do modelo.
+
+**Preservar a última extensão** fica marcado inicialmente para arquivos. Em
+arquivo.tar.gz, conserva .gz; pastas não têm extensão separada e nomes iniciados
+por ponto sem outro ponto são tratados como nome inteiro. Desmarque para incluir
+a extensão no campo {name} e na substituição. Para {date}, escolha modificação,
+criação no sistema de arquivos ou data do calendário. Formatos: yyyy-MM-dd,
+yyyyMMdd ou yyyy-MM-dd_HHmmss; a data escolhida usa 00:00:00. Datas do sistema
+são apresentadas no horário local e não são datas EXIF de captura.
+
+Desmarque linhas para excluí-las. Após mudar opções/inclusões, clique em **Gerar
+prévia**. A lista mostra nome atual, nome final e situação. A confirmação anterior
+é invalidada ao editar; **Aplicar renomeação** só habilita depois de uma prévia
+válida, com alteração, e da marcação **Revisei os nomes finais…**. Enter não aplica
+o lote por padrão. Nomes reservados/inválidos, destinos já ocupados e nomes finais
+duplicados bloqueiam todo o lote. Trocas/ciclos de nomes ocupados não são resolvidos
+por nomes temporários nesta etapa; ajuste a prévia. Links/junções são recusados.
+
+Ao aplicar, as origens e os destinos são revalidados antes da primeira mudança;
+um item alterado/substituído desde a prévia exige gerar outra. Cada renomeação usa
+o item aberto e nunca substitui um destino. Conflito ou falha surgido durante o
+lote interrompe os próximos itens. **Cancelar trabalho** conserva nomes já
+concluídos; o relatório identifica concluídos, sem alteração, não iniciados e erros.
+Fechar durante um trabalho solicita cancelamento e aguarda seu encerramento.
+
+Não há transação de toda a pasta nem desfazer automático. A prévia e o relatório
+permanecem na janela até fechar; esta etapa não grava um histórico de reversão
+persistente. Nenhuma regra de renomeação escreve no conteúdo dos arquivos.
+
+![Prévia de renomeação com dados demonstrativos](images/batch-rename.png)
 
 ## Outras operações
 

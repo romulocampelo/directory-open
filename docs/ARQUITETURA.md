@@ -12,7 +12,10 @@ pelo aplicativo e pelos testes; não representa um plugin ou SDK público.
 | Modelo somente leitura, navegação e seleção compartilhada | filepanel |
 | Política de arraste nas duas apresentações | filelistview / FileTransferView |
 | Identidade e formatos da área de transferência | filetransfer |
-| Operação nativa e resultado por item | fileoperation |
+| Operações nativas e resultado comum por item | fileoperation |
+| Planejamento/identidade e motor nativo do lote | batchrename |
+| Prévia, confirmação e trabalhador exclusivo do lote | batchrenamedialog |
+| Reprodução local e propriedade do player/dispositivo | mediapreview |
 | Confirmação, destino e conflitos | operationdialog |
 | Registro, backups, recuperação e concorrência da sessão | sessionstore |
 | Fatos, codec e catálogo das exibições por pasta | folderview |
@@ -75,6 +78,39 @@ permitem caminhos longos sem depender da política do Windows hospedeiro; apenas
 esses prefixos são retirados para exposição ao usuário. Busca e comparação usam
 o mesmo proprietário dessa representação.
 
+## Renomeação e mídia
+
+batchrename é dono dos nomes gerados e da identidade observada. O template é
+analisado uma vez e nomes/substituições não são interpretados novamente. A expansão
+é limitada a 255 caracteres antes de alocar representações maiores; até 1.000 itens
+e 2 MiB de caminhos. O plano registra volume/índice/atributos/tamanho/mtime/criação do handle.
+A execução revalida todo o plano antes de escrever e por item, mantém a pasta
+aberta sem compartilhar exclusão, resolve sua representação Win32 por handle e usa
+SetFileInformationByHandle/FileRenameInfo com ReplaceIfExists=false. RootDirectory
+é nulo e o destino é absoluto; a forma relativa falhou com Windows 87 no teste nativo.
+Não substituir por tentativas de overwrite ou nomes temporários para contornar conflitos.
+
+O diálogo modal mantém a exclusão mútua de operações de MainWindow. Planejar e aplicar
+acontecem no trabalhador, com resultado lido após wait, confirmação invalidada por
+qualquer mudança e progresso por contador. Linhas são indexadas pela origem; a UI
+não refaz geração/validação. selectedPaths ordena os índices pela linha no produtor,
+de modo que consumidores recebam a ordem da apresentação, inclusive nas miniaturas.
+Cancelamento conserva o que já terminou; sem transação global/desfazer automático.
+
+MediaPreview só é criado para uma extensão de mídia candidata. Cada seleção cria
+um player próprio, ligado a QFile somente leitura, e destrói o anterior antes de
+liberar seu dispositivo; sinais pertencem ao player de origem, evitando respostas
+antigas na seleção nova. Decodificação e buffers pertencem ao backend Qt Multimedia;
+a UI não lê o arquivo inteiro. Não há autoplay nem avanço automático. O mesmo widget
+é reparentado na ampliação/F11, conservando o player. Mudança de arquivo, dock oculto,
+fechamento ou operação que muda a origem liberam o player/arquivo.
+
+O pipeline estático imagem/texto/PDF continua com PreviewWorker e serial; uma seleção
+de mídia invalida esse trabalho e não aceita seus resultados. Não criar backend de
+mídia ao selecionar texto/imagem/PDF ou ao abrir o aplicativo sem mídia. Formatos e
+codecs dependem das bibliotecas reais; fixtures WAV e AVI/MJPEG não provam MP4/H.264,
+HEVC ou todos os dispositivos. APIs Qt usadas permanecem compatíveis com Qt 6.8.
+
 ## Testes e evidência
 
 Teste pelo fluxo público da UI e pelos limites produtores quando o fluxo público
@@ -82,3 +118,6 @@ não reproduz uma semântica distinta. Use arquivos temporários e sessões isol
 Distinguir testes offscreen de clipboard/atalhos nativos e instalação em outro PC.
 Aguardar exposição/ativação e usar o filho focado ao simular teclas nativas.
 Veja [COMPILAR.md](COMPILAR.md) para execução e omissões.
+
+Referências das integrações: [QMediaPlayer](https://doc.qt.io/qt-6/qmediaplayer.html) e
+[FILE_RENAME_INFO](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_rename_info).

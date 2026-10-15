@@ -1,4 +1,5 @@
 #include "filepanel.h"
+#include <algorithm>
 #include "filelistview.h"
 #include "folderviewsdialog.h"
 #include "thumbnailcache.h"
@@ -316,7 +317,9 @@ QString FilePanel::selectedPath() const {
 }
 QStringList FilePanel::selectedPaths() const {
     QStringList paths;
-    for (const auto &index : m_view->selectionModel()->selectedRows()) {
+    auto rows = m_view->selectionModel()->selectedRows();
+    std::sort(rows.begin(), rows.end(), [](const QModelIndex &a, const QModelIndex &b) { return a.row() < b.row(); });
+    for (const auto &index : rows) {
         const auto source = m_filter->mapToSource(index);
         if (source.isValid()) paths.append(m_model->filePath(source));
     }

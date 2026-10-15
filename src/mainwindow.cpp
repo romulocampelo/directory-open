@@ -1,6 +1,7 @@
 #include "mainwindow.h"
 #include "filepanel.h"
 #include "operationdialog.h"
+#include "batchrenamedialog.h"
 #include "favoritesdialog.h"
 #include "searchdialog.h"
 #include "comparisondialog.h"
@@ -126,6 +127,7 @@ MainWindow::MainWindow(const QString &left, const QString &right, bool nativeOpe
     m_moveAction = action("moveFiles", tr("Mover"), QStyle::SP_ArrowRight, QKeySequence("Ctrl+M"), [this] { startOperation(OperationKind::Move); });
     m_moveAction->setToolTip(tr("Mover seleção para o outro painel (Ctrl+M)"));
     m_renameAction = action("renameFile", tr("Renomear"), QStyle::SP_FileIcon, QKeySequence("F2"), [this] { startOperation(OperationKind::Rename); });
+    m_batchRenameAction = action("batchRename", tr("Renomear em lote…"), QStyle::SP_FileDialogListView, QKeySequence("Ctrl+F2"), [this] { startBatchRename(); });
     m_folderAction = action("createFolder", tr("Nova pasta"), QStyle::SP_FileDialogNewFolder, QKeySequence("Ctrl+Shift+N"), [this] { startOperation(OperationKind::CreateFolder); });
     m_trashAction = action("trashFiles", tr("Lixeira"), QStyle::SP_TrashIcon, QKeySequence("Delete"), [this] { startOperation(OperationKind::Trash); });
     m_trashAction->setToolTip(tr("Enviar seleção à Lixeira (Delete)"));
@@ -163,14 +165,14 @@ MainWindow::MainWindow(const QString &left, const QString &right, bool nativeOpe
     connect(dark, &QAction::toggled, this, &MainWindow::applyTheme);
     auto *folderMenu = menuBar()->addMenu(tr("&Pastas")); folderMenu->addAction(newTab); folderMenu->addAction(m_folderAction); folderMenu->addAction(refresh);
     auto *compare = action("compareFolders", tr("Comparar pastas…"), QStyle::SP_FileDialogDetailedView, QKeySequence("Ctrl+Shift+K"), [this] { showComparison(); });
-    auto *toolsMenu = menuBar()->addMenu(tr("&Ferramentas")); toolsMenu->addAction(search); toolsMenu->addAction(compare); toolsMenu->addAction(copyPath);
+    auto *toolsMenu = menuBar()->addMenu(tr("&Ferramentas")); toolsMenu->addAction(search); toolsMenu->addAction(compare); toolsMenu->addAction(m_batchRenameAction); toolsMenu->addAction(copyPath);
     auto *helpMenu = menuBar()->addMenu(tr("A&juda")); helpMenu->addAction(tr("Sobre o Directory Open"), this, [this] {
         QMessageBox::about(this, tr("Directory Open"), tr("Directory Open %1\nGerenciador de arquivos aberto.\n\nNavegação, operações de arquivos, visualização, comparação de pastas e sessão.").arg(QString::fromLatin1(DIROPEN_VERSION)));
     });
     auto *toolbar = addToolBar(tr("Comandos")); toolbar->setObjectName("commands");
     toolbar->setMovable(false); toolbar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon); toolbar->setIconSize(QSize(18, 18));
     toolbar->addAction(open); toolbar->addSeparator(); toolbar->addAction(m_copyAction);
-    toolbar->addActions({m_moveAction, m_renameAction, m_folderAction, m_trashAction});
+    toolbar->addActions({m_moveAction, m_renameAction, m_batchRenameAction, m_folderAction, m_trashAction});
     toolbar->addSeparator(); toolbar->addAction(m_pasteAction); toolbar->addAction(copyPath); toolbar->addAction(refresh); toolbar->addAction(m_cancelOperation); toolbar->addSeparator();
     toolbar->addAction(dual);
     toolbar->addAction(search); toolbar->addAction(compare);
@@ -243,8 +245,20 @@ void MainWindow::updateOperationActions() {
     m_copyAction->setEnabled(available && !selected.isEmpty());
     m_moveAction->setEnabled(available && !selected.isEmpty());
     m_renameAction->setEnabled(available && selected.size() == 1);
+    m_batchRenameAction->setEnabled(available && !selected.isEmpty() && selected.size() <= 1000);
     m_trashAction->setEnabled(available && !selected.isEmpty());
     m_folderAction->setEnabled(available && QFileInfo(m_active->path()).isDir());
+}
+void MainWindow::startBatchRename() {
+    if (m_operationJob || m_confirming || m_viewerDialog) return;
+    const auto sources = m_active->selectedPaths();
+    if (sources.isEmpty() || sources.size() > 1000) return;
+    m_previewWidget->releaseMedia();
+    {
+        QScopedValueRollback<bool> confirming(m_confirming, true); updateOperationActions();
+        BatchRenameDialog dialog(sources, this); dialog.exec();
+    }
+    m_left->refresh(); m_right->refresh(); updateOperationActions();
 }
 void MainWindow::startOperation(OperationKind kind) {
     if (m_operationJob) return;
@@ -258,6 +272,7 @@ void MainWindow::startOperation(OperationKind kind) {
 }
 void MainWindow::runOperation(OperationRequest request, std::optional<ClipboardSnapshot> clipboard) {
     if (m_operationJob || m_confirming || m_viewerDialog) return;
+    if (request.kind == OperationKind::Move || request.kind == OperationKind::Rename || request.kind == OperationKind::Trash) m_previewWidget->releaseMedia();
     request.nativeUi = m_nativeOperationUi;
     bool accepted = false;
     {
@@ -395,7 +410,7 @@ void MainWindow::showFileContextMenu(const QPoint &position) {
     menu.addActions({m_openAction, m_openTabAction}); menu.addSeparator();
     menu.addActions({m_clipboardCopyAction, m_clipboardCutAction, m_pasteAction});
     auto *between = menu.addMenu(tr("Para o outro painel")); between->addActions({m_copyAction, m_moveAction});
-    menu.addSeparator(); menu.addActions({m_renameAction, m_trashAction}); menu.addSeparator();
+    menu.addSeparator(); menu.addActions({m_renameAction, m_batchRenameAction, m_trashAction}); menu.addSeparator();
     menu.addActions({m_folderAction, m_copyPathAction, m_refreshAction});
     menu.exec(position);
 }

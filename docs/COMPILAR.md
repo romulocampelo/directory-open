@@ -3,7 +3,7 @@
 ## Ambiente
 
 Use Qt 6.8+ MSVC 2022 x64, Visual Studio 2022 ou posterior com desenvolvimento
-C++ para desktop e Windows SDK (C++/WinRT), CMake 3.21+ e Ninja. Qt Widgets/Test
+C++ para desktop e Windows SDK (C++/WinRT), CMake 3.21+ e Ninja. Qt Widgets/Test e Multimedia/MultimediaWidgets
 são necessários para desenvolvimento. MinGW, Linux e macOS não são suportados:
 operações e PDF usam APIs nativas do Windows.
 
@@ -59,8 +59,9 @@ ctest --test-dir build --output-on-failure
 
 ## Verificação
 
-CTest contém nove suítes: navegação, operações nativas, sessão, clipboard/arraste,
-busca/favoritos, exibição por pasta, miniaturas, visualizador e comparação de pastas.
+CTest contém onze suítes: navegação, operações nativas, sessão, clipboard/arraste,
+busca/favoritos, exibição por pasta, miniaturas, visualizador, comparação de pastas,
+renomeação em lote e mídia.
 Fixtures e sessões
 alternativas preservam dados pessoais. Os XMLs de resultado ficam em build.
 Testes de clipboard preservam/restauram formatos em memória. Testes de Lixeira
@@ -78,11 +79,23 @@ $env:QT_QPA_PLATFORM_PLUGIN_PATH = "$env:NAVEGA_QT_DIR\plugins\platforms"
 & .\build\preview_tests.exe
 & .\build\transfer_tests.exe
 & .\build\comparison_tests.exe
+& .\build\batch_rename_tests.exe
+& .\build\media_tests.exe
 ~~~
 
 Para uma captura opcional, defina DIROPEN_THUMBNAIL_CAPTURE ou
 DIROPEN_PREVIEW_CAPTURE com um destino local antes da suíte correspondente.
 DIROPEN_COMPARISON_CAPTURE captura a comparação com endereços ilustrativos.
+DIROPEN_BATCH_CAPTURE e DIROPEN_MEDIA_CAPTURE capturam
+as novas interfaces usando apenas dados demonstrativos.
+
+A suíte de mídia gera WAV PCM e AVI/MJPEG próprios e exercita o backend real do
+Qt, incluindo quadros decodificados. Não usa vídeo baixado ou ffmpeg.exe. O
+workflow instala o módulo qtmultimedia no runner; localmente, se faltar o módulo,
+use o MaintenanceTool da instalação Qt e adicione Qt Multimedia da mesma versão
+e kit MSVC x64. build.cmd não o instala. windeployqt distribui as bibliotecas e
+plugins de mídia correspondentes. Não há garantia de todo codec ou dispositivo
+de áudio/GPU a partir de um único ambiente.
 CI não substitui testes interativos nem pacote numa máquina sem ferramentas de
 desenvolvimento. Um aviso OLE foi observado na limpeza do clipboard em testes
 nativos anteriores, sem falha; não considerar sua causa ou correção estabelecidas.

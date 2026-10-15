@@ -2,6 +2,7 @@
 #include <QWidget>
 #include "previewloader.h"
 class ImageCanvas;
+class MediaPreview;
 class QLabel;
 class QPlainTextEdit;
 class QLineEdit;
@@ -16,6 +17,7 @@ public:
     ~PreviewWidget() override;
     void setPath(const QString &path);
     void reload();
+    void releaseMedia();
     const PreviewResult &result() const { return m_result; }
 signals:
     void navigateFile(int direction);
@@ -23,6 +25,7 @@ signals:
     void displayed();
 private:
     PreviewWorker *m_worker;
+    MediaPreview *m_media = nullptr;
     QString m_path;
     quint64 m_serial = 0;
     PreviewResult m_result;

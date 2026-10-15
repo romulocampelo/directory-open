@@ -7,7 +7,7 @@
 #include <optional>
 #include <atomic>
 
-enum class PreviewKind { Empty, Image, Text, Pdf, Error };
+enum class PreviewKind { Empty, Image, Text, Pdf, Error, Media };
 enum class PreviewEncoding { Auto, Utf8, Utf16LE, Utf16BE, Windows1252, Latin1 };
 struct PreviewRequest { QString path; int page = 0; PreviewEncoding encoding = PreviewEncoding::Auto; quint64 serial = 0; };
 struct PreviewResult {

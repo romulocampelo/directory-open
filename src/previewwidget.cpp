@@ -1,4 +1,5 @@
 #include "previewwidget.h"
+#include "mediapreview.h"
 #include <QAbstractScrollArea>
 #include <QAction>
 #include <QComboBox>
@@ -90,7 +91,7 @@ PreviewWidget::PreviewWidget(QWidget *parent) : QWidget(parent) {
     m_rotate = tools->addAction(tr("Girar")); m_rotate->setObjectName("previewRotate"); m_rotate->setToolTip(tr("Girar a visualização 90 graus, sem alterar o arquivo"));
     m_stack = new QStackedWidget(this); m_canvas = new ImageCanvas(this);
     m_text = new QPlainTextEdit(this); m_text->setObjectName("previewText"); m_text->setReadOnly(true); m_text->setLineWrapMode(QPlainTextEdit::NoWrap);
-    m_status = new QLabel(tr("Imagens, texto e PDF"), this); m_status->setObjectName("previewMessage"); m_status->setTextFormat(Qt::PlainText); m_status->setAlignment(Qt::AlignCenter); m_status->setWordWrap(true);
+    m_status = new QLabel(tr("Imagens, texto, PDF, áudio e vídeo"), this); m_status->setObjectName("previewMessage"); m_status->setTextFormat(Qt::PlainText); m_status->setAlignment(Qt::AlignCenter); m_status->setWordWrap(true);
     m_stack->addWidget(m_status); m_stack->addWidget(m_canvas); m_stack->addWidget(m_text); layout->addWidget(m_stack, 1);
     connect(m_zoomIn, &QAction::triggered, this, [this] { m_canvas->zoom(1.25); }); connect(m_zoomOut, &QAction::triggered, this, [this] { m_canvas->zoom(0.8); });
     connect(m_actual, &QAction::triggered, m_canvas, &ImageCanvas::actual); connect(m_fit, &QAction::triggered, m_canvas, &ImageCanvas::fit); connect(m_rotate, &QAction::triggered, m_canvas, &ImageCanvas::rotate);
@@ -120,7 +121,7 @@ PreviewWidget::PreviewWidget(QWidget *parent) : QWidget(parent) {
     for (auto *action : {m_zoomIn, m_zoomOut, m_actual, m_fit, m_rotate}) action->setEnabled(false);
     m_worker = new PreviewWorker(this); connect(m_worker, &PreviewWorker::ready, this, [this] { auto result = m_worker->takeResult(); if (result) showResult(std::move(*result)); });
 }
-PreviewWidget::~PreviewWidget() { m_worker->stop(); m_worker->wait(); }
+PreviewWidget::~PreviewWidget() { if (m_media) m_media->release(); m_worker->stop(); m_worker->wait(); }
 void PreviewWidget::setPath(const QString &path) {
     if (path == m_path) return;
     m_path = path; m_canvas->content({}, {});
@@ -128,14 +129,29 @@ void PreviewWidget::setPath(const QString &path) {
     m_pdfTools->hide(); m_textTools->hide(); m_find->clear(); load();
 }
 void PreviewWidget::reload() { const QSignalBlocker blocker(m_page); m_page->setValue(1); load(); }
+void PreviewWidget::releaseMedia() {
+    if (m_media) { m_media->release(); if (m_stack->currentWidget() == m_media) { m_status->setText(tr("Reprodução encerrada. Use Atualizar para carregar novamente.")); m_stack->setCurrentWidget(m_status); } }
+}
 void PreviewWidget::load() {
+    if (m_media) m_media->release();
     m_title->setText(m_path.isEmpty() ? tr("Selecione um arquivo") : QFileInfo(m_path).fileName()); m_title->setToolTip(m_path);
-    m_result = {}; m_text->clear(); m_canvas->content({}, {}, false); m_details->clear(); m_status->setText(m_path.isEmpty() ? tr("Imagens, texto e PDF") : tr("Carregando…")); m_stack->setCurrentWidget(m_status);
+    m_result = {}; m_text->clear(); m_canvas->content({}, {}, false); m_details->clear(); m_status->setText(m_path.isEmpty() ? tr("Imagens, texto, PDF, áudio e vídeo") : tr("Carregando…")); m_stack->setCurrentWidget(m_status);
     for (auto *action : {m_zoomIn, m_zoomOut, m_actual, m_fit, m_rotate}) action->setEnabled(false);
+    if (!m_path.isEmpty() && MediaPreview::accepts(m_path)) {
+        PreviewRequest clear; m_serial = m_worker->submit(clear); if (!m_worker->isRunning()) m_worker->start();
+        if (!m_media) {
+            m_media = new MediaPreview(this); m_stack->addWidget(m_media);
+            connect(m_media, &MediaPreview::loaded, this, [this](bool success, const QString &message) {
+                if (m_stack->currentWidget() != m_media) return;
+                m_result.kind = success ? PreviewKind::Media : PreviewKind::Error; m_result.path = m_path; m_result.message = message; emit displayed();
+            });
+        }
+        m_textTools->hide(); m_pdfTools->hide(); m_stack->setCurrentWidget(m_media); m_media->setPath(m_path); return;
+    }
     PreviewRequest request; request.path = m_path; request.page = m_page->value() - 1; request.encoding = PreviewEncoding(m_encoding->currentData().toInt()); m_serial = m_worker->submit(request); if (!m_worker->isRunning()) m_worker->start();
 }
 void PreviewWidget::showResult(PreviewResult result) {
-    if (result.serial != m_serial) return;
+    if (result.serial != m_serial || (!m_path.isEmpty() && MediaPreview::accepts(m_path))) return;
     m_result = std::move(result); const auto &content = m_result;
     const bool picture = content.kind == PreviewKind::Image || content.kind == PreviewKind::Pdf;
     for (auto *action : {m_zoomIn, m_zoomOut, m_actual, m_fit}) action->setEnabled(picture); m_rotate->setEnabled(content.kind == PreviewKind::Image);
@@ -146,7 +162,7 @@ void PreviewWidget::showResult(PreviewResult result) {
         else m_details->setText(tr("%1 × %2 pixels%3").arg(content.originalSize.width()).arg(content.originalSize.height()).arg(content.image.size() != content.originalSize ? tr(" — prévia reduzida") : QString{}));
     } else if (content.kind == PreviewKind::Text) {
         m_text->setPlainText(content.text); m_stack->setCurrentWidget(m_text); m_details->setText(content.encoding + (content.truncated ? tr(" — primeiros 1 MiB; conteúdo parcial") : QString{}));
-    } else { m_stack->setCurrentWidget(m_status); m_status->setText(!content.message.isEmpty() ? content.message : tr("Imagens, texto e PDF")); }
+    } else { m_stack->setCurrentWidget(m_status); m_status->setText(!content.message.isEmpty() ? content.message : tr("Imagens, texto, PDF, áudio e vídeo")); }
     emit displayed();
 }
 void PreviewWidget::findText(bool backwards) {
