@@ -1,4 +1,4 @@
-# Manual do Directory Open 0.11
+# Manual do Directory Open 0.12
 
 ## Recursos e atalhos
 
@@ -39,6 +39,7 @@ Esses três atalhos só atuam em arquivos quando a lista tem o foco; nos campos
 de texto, mantêm a edição normal. O botão Colar também está na barra de comandos.
 Ctrl+Shift+F abre a busca recursiva; Ctrl+D adiciona a pasta atual aos favoritos.
 Ctrl+Shift+K abre a comparação das pastas dos dois painéis. Ctrl+F2 abre a renomeação em lote.
+Ctrl+Shift+R abre o histórico de renomeações.
 
 ## Visualizar arquivos
 
@@ -65,7 +66,7 @@ arquivos identificados como binários não são convertidos automaticamente.
 Não é necessário instalar Qt PDF, Adobe Reader ou outro leitor. O SDK Windows
 fornece os cabeçalhos para compilar. As páginas são imagens: nesta etapa,
 não há seleção/pesquisa de texto de PDF, formulários, links interativos ou entrada de
-senha. PDFs protegidos ou inválidos mostram um aviso. Áudio/vídeo e Office ficam para
+senha. PDFs protegidos ou inválidos mostram um aviso. Documentos Office ficam para
 outra etapa.
 
 **Áudio e vídeo:** selecione um arquivo e use F7/F3. Clique em **Reproduzir**;
@@ -191,7 +192,7 @@ resultado antigo; compare novamente para atualizar. Esta etapa inspeciona os dad
 não copia, move, apaga nem sincroniza arquivos. Use os comandos existentes dos
 painéis para qualquer operação posterior, com as confirmações habituais.
 
-## Miniaturas de imagens
+## Miniaturas de imagens, PDF e vídeo
 
 No menu **Exibição** de cada painel, escolha **Miniaturas**. A grade mantém pastas
 e outros arquivos com seus ícones e mostra as imagens dos formatos reconhecidos
@@ -204,22 +205,36 @@ Seleção múltipla, filtro, ordenação, F3/F7, copiar/recortar/colar, arraste 
 contexto usam os mesmos comandos e confirmações da lista. Os nomes longos são
 abreviados na grade; passe o mouse para ver o caminho completo. Imagens inválidas,
 sem acesso ou acima dos limites mantêm o ícone com uma indicação; a dica mostra
-o motivo. PDFs, vídeos, documentos e pastas têm ícones nesta etapa.
+o motivo. Outros documentos e pastas continuam com seus ícones.
 
-Somente imagens visíveis entram na fila, com até 128 solicitações por painel e
-256 no conjunto. Em telas excepcionalmente grandes, imagens além dessa cobertura
+Somente candidatos visíveis entram na fila, com até 128 solicitações por painel e
+256 no conjunto. Em telas excepcionalmente grandes, candidatos além dessa cobertura
 mantêm o ícone; reduzir a janela ou aumentar as miniaturas reduz a quantidade visível.
 Há um trabalhador de miniaturas por janela e um cache compartilhado de até 64 MiB de bitmaps e
 256 entradas, sem arquivos de cache nas pastas. A miniatura retida tem até 256×256
 pixels e é ampliada pela tela quando necessário; use F3 para examinar detalhes.
-A leitura respeita 64 MiB por arquivo, 128 megapixels e a orientação EXIF. Somente
-o primeiro quadro é usado; PNG/JPEG e orientação JPEG foram verificados.
+Para imagens, a leitura respeita 64 MiB por arquivo, 128 megapixels e a orientação
+EXIF. Somente o primeiro quadro é usado; PNG/JPEG e orientação JPEG foram verificados.
 
 O cache distingue caminho, tamanho e data de modificação observados pelo modelo.
 **Atualizar (F5)** limpa as miniaturas da janela e relê a pasta; use-o após uma
 edição que tenha preservado esses metadados. Mudanças de pasta ou filtro substituem
 a fila pendente; uma leitura/decodificação em curso pode precisar terminar, inclusive
 no fechamento. A memória de trabalho dos decodificadores é adicional ao cache.
+
+PDF usa a primeira página e o mesmo componente nativo Windows.Data.Pdf do
+visualizador. O arquivo é lido até 64 MiB, sem ficar aberto durante a renderização.
+PDF inválido, protegido ou acima do limite conserva o ícone com o motivo na dica.
+
+Vídeo usa o primeiro quadro válido, sem saída de áudio, e pode mostrar uma imagem
+preta quando o começo do próprio vídeo for preto. Os contêineres candidatos são
+os de vídeo listados no visualizador; codec disponível continua sendo necessário.
+A leitura é por dispositivo, sem carregar o vídeo inteiro. O quadro convertido
+é limitado a 16 megapixels e a miniatura a 256×256. A espera por quadro é de até
+8 segundos; o encerramento de uma chamada nativa pode precisar terminar depois
+do cancelamento. Áudio permanece com o ícone comum.
+
+![Miniaturas de PDF e vídeo com arquivos gerados para demonstração](images/document-thumbnails.png)
 
 ## Exibição por pasta
 
@@ -308,9 +323,46 @@ lote interrompe os próximos itens. **Cancelar trabalho** conserva nomes já
 concluídos; o relatório identifica concluídos, sem alteração, não iniciados e erros.
 Fechar durante um trabalho solicita cancelamento e aguarda seu encerramento.
 
-Não há transação de toda a pasta nem desfazer automático. A prévia e o relatório
-permanecem na janela até fechar; esta etapa não grava um histórico de reversão
-persistente. Nenhuma regra de renomeação escreve no conteúdo dos arquivos.
+O programa grava o mapa do lote antes da primeira mudança. Se não puder gravar,
+não inicia o lote. Falha de gravação depois de renomear aparece como resultado
+incompleto, com o caminho do mapa preservado. Nenhuma regra escreve no conteúdo
+dos arquivos. Não há transação de toda a pasta; a reversão é uma ação explícita.
+
+### Desfazer um lote
+
+Abra **Ferramentas → Histórico de renomeações…** (**Ctrl+Shift+R**), escolha um lote,
+marque os itens disponíveis e revise os nomes originais. Marque **Revisei os nomes
+originais…** e clique em **Desfazer itens marcados**. A prévia é conferida novamente
+ao aplicar. Alterar a seleção invalida a confirmação.
+
+O histórico cobre os lotes executados a partir da 0.12 com sessão habilitada;
+não recupera operações anteriores, renomeações individuais F2, movimentos ou
+exclusões. Ficam bloqueados nomes originais ocupados, itens ausentes, substituídos,
+com tamanho/datas/atributos alterados, links e identidades não confirmadas. A
+conferência usa identidade nativa e metadados, não um hash integral do conteúdo:
+edições que preservem todos esses valores podem não ser detectadas.
+
+É possível escolher apenas os itens disponíveis de um lote com conflitos.
+Cancelar conserva os já desfeitos; consulte o lote novamente para continuar.
+Após interrupção, a prévia reconcilia nomes e identidades e indica itens já
+restaurados. Mudanças de maiúsculas/minúsculas também usam o nome real do disco.
+Não existe refazer automático.
+
+Na sessão normal, os registros ficam em
+**%LOCALAPPDATA%\Navega\session.json.rename-history**; uma sessão alternativa usa
+a pasta **CAMINHO-DA-SESSÃO.rename-history**. São mapas JSON locais, com nomes e
+caminhos, gravação atômica e cópia anterior .bak. Preserve esses arquivos se precisar
+recuperar um trabalho. Registros inválidos ou de versão desconhecida não são
+sobrescritos automaticamente; a cópia anterior fica disponível para recuperação
+manual. O programa não apaga registros antigos por conta própria.
+
+Limites: 1.000 lotes, até 1.000 itens por lote, 8 MiB por registro e orçamento
+de 4 MiB de caminhos UTF-16 contando origem e destino. Ao atingir a capacidade,
+arquive os registros antigos, com o aplicativo fechado, antes de iniciar outro
+lote. **--no-session** desativa o histórico persistente e o comando de desfazer;
+a renomeação em lote continua disponível com aviso de histórico desativado.
+
+![Prévia do desfazer com conflitos demonstrativos](images/rename-history.png)
 
 ![Prévia de renomeação com dados demonstrativos](images/batch-rename.png)
 

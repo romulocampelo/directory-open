@@ -59,9 +59,9 @@ ctest --test-dir build --output-on-failure
 
 ## Verificação
 
-CTest contém onze suítes: navegação, operações nativas, sessão, clipboard/arraste,
+CTest contém treze suítes: navegação, operações nativas, sessão, clipboard/arraste,
 busca/favoritos, exibição por pasta, miniaturas, visualizador, comparação de pastas,
-renomeação em lote e mídia.
+renomeação em lote, mídia, histórico/reversão e miniaturas PDF/vídeo.
 Fixtures e sessões
 alternativas preservam dados pessoais. Os XMLs de resultado ficam em build.
 Testes de clipboard preservam/restauram formatos em memória. Testes de Lixeira
@@ -81,6 +81,8 @@ $env:QT_QPA_PLATFORM_PLUGIN_PATH = "$env:NAVEGA_QT_DIR\plugins\platforms"
 & .\build\comparison_tests.exe
 & .\build\batch_rename_tests.exe
 & .\build\media_tests.exe
+& .\build\rename_history_tests.exe
+& .\build\document_thumbnails_tests.exe
 ~~~
 
 Para uma captura opcional, defina DIROPEN_THUMBNAIL_CAPTURE ou
@@ -88,6 +90,8 @@ DIROPEN_PREVIEW_CAPTURE com um destino local antes da suíte correspondente.
 DIROPEN_COMPARISON_CAPTURE captura a comparação com endereços ilustrativos.
 DIROPEN_BATCH_CAPTURE e DIROPEN_MEDIA_CAPTURE capturam
 as novas interfaces usando apenas dados demonstrativos.
+DIROPEN_CAPTURE_DIR recebe a pasta das capturas de histórico e miniaturas PDF/vídeo
+nas novas suítes; são opcionais e executadas apenas com o plugin windows.
 
 A suíte de mídia gera WAV PCM e AVI/MJPEG próprios e exercita o backend real do
 Qt, incluindo quadros decodificados. Não usa vídeo baixado ou ffmpeg.exe. O
@@ -110,3 +114,7 @@ nativos anteriores, sem falha; não considerar sua causa ou correção estabelec
 
 A sessão normal continua em %LOCALAPPDATA%\Navega\session.json para preservar
 usuários do nome anterior. Não copiar esse registro para o Git.
+
+O histórico é desativado por --no-session. Uma sessão isolada habilita um histórico
+próprio em CAMINHO-DA-SESSÃO.rename-history. Os testes usam somente diretórios
+temporários; não inclua esses mapas de caminhos pessoais no repositório.

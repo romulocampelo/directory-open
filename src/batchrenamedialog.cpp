@@ -15,7 +15,7 @@
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
-BatchRenameDialog::BatchRenameDialog(QStringList sources, QWidget *parent) : QDialog(parent), m_sources(std::move(sources)) {
+BatchRenameDialog::BatchRenameDialog(QStringList sources, QWidget *parent, QString historyRoot) : QDialog(parent), m_sources(std::move(sources)), m_historyRoot(std::move(historyRoot)) {
     setObjectName("batchRenameDialog"); setWindowTitle(tr("Renomear em lote")); resize(1040, 730);
     auto *layout = new QVBoxLayout(this); auto *form = new QFormLayout;
     auto edit = [&](const QString &name, const QString &text) { auto *value = new QLineEdit(text, this); value->setObjectName(name); value->setMaxLength(1024); return value; };
@@ -77,7 +77,7 @@ void BatchRenameDialog::startPreview() {
 }
 void BatchRenameDialog::apply() {
     if (m_job || !m_plan.valid() || !m_confirm->isChecked() || !m_plan.changes()) return;
-    m_applying = true; setBusy(true); m_job = new BatchRenameJob(m_plan, this); m_timer->start();
+    m_applying = true; setBusy(true); m_job = new BatchRenameJob(m_plan, this, m_historyRoot); m_timer->start();
     connect(m_job, &QThread::finished, this, [this] {
         m_timer->stop(); m_job->wait(); const auto result = m_job->result(); m_job->deleteLater(); m_job = nullptr; m_applied = true; setBusy(false);
         const QSignalBlocker blocker(m_table);
@@ -85,7 +85,7 @@ void BatchRenameDialog::apply() {
             QString state; switch(item.state) { case OperationItemState::Completed: state = tr("Concluído"); break; case OperationItemState::Skipped: state = tr("Sem alteração"); break; case OperationItemState::NotStarted: state = tr("Não iniciado"); break; case OperationItemState::Cancelled: state = tr("Cancelado"); break; case OperationItemState::Failed: state = tr("Erro"); break; case OperationItemState::Incomplete: state = tr("Não confirmado"); break; }
             view->setText(3, state + (item.error.isEmpty() ? QString{} : ": " + item.error)); view->setToolTip(3, item.error);
         }
-        m_status->setText((result.state == OperationState::Completed ? tr("Lote concluído.") : result.state == OperationState::Cancelled ? tr("Lote cancelado; resultado parcial.") : tr("Lote interrompido; confira o resultado por item.")) + tr(" Itens renomeados: %1. Não há desfazer automático.").arg(result.completedCount()) + (result.error.isEmpty() ? QString{} : "\n" + result.error));
+        m_status->setText((result.state == OperationState::Completed ? tr("Lote concluído.") : result.state == OperationState::Cancelled ? tr("Lote cancelado; resultado parcial.") : tr("Lote interrompido; confira o resultado por item.")) + tr(" Itens renomeados: %1.").arg(result.completedCount()) + (m_historyRoot.isEmpty() ? tr(" Histórico desativado no modo sem sessão.") : tr(" Consulte Ferramentas → Histórico de renomeações para desfazer.")) + (result.error.isEmpty() ? QString{} : "\n" + result.error));
         if (m_closePending) QDialog::reject();
     }); m_job->start();
 }

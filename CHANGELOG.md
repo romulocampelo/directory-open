@@ -1,5 +1,19 @@
 # Histórico do Directory Open
 
+## 0.12.0 — histórico de renomeações e miniaturas de documentos/mídia
+
+- Histórico persistente dos novos lotes, com mapa gravado antes de alterar nomes,
+  gravação atômica, backup e proteção contra duas janelas escrevendo ao mesmo tempo.
+- Ferramentas → Histórico de renomeações (Ctrl+Shift+R): prévia, escolha de itens e
+  confirmação para desfazer. Revalidação de identidade, tamanho/datas e nomes livres;
+  conflitos, alterações e incertezas ficam bloqueados, sem substituir destinos.
+- Cancelamentos e interrupções conservam o mapa; uma nova prévia identifica o que
+  já voltou ao nome original e o que ainda pode ser desfeito. Modo sem sessão não grava histórico.
+- Miniaturas da primeira página de PDF e do primeiro quadro válido de vídeo,
+  sem áudio, na fila/cache compartilhados. Formato/codec inválido mostra o motivo.
+- Renderizador PDF compartilhado entre visualizador e miniaturas, com cache por
+  conteúdo, limites e escala do Windows tratados no mesmo componente.
+
 ## 0.11.0 — renomeação em lote e áudio/vídeo
 
 - Prévia de renomeação (Ctrl+F2) com modelo, numeração, substituição literal e datas
@@ -27,8 +41,8 @@
   do Windows; representação compartilhada com a comparação.
 
 
-As versões abaixo foram entregues e testadas localmente no Windows. Ainda não
-há publicação no GitHub nem pacote validado em outro computador.
+As versões abaixo registram entregas anteriores, inicialmente validadas localmente.
+O código foi publicado posteriormente no GitHub; o pacote para outro computador continua pendente.
 
 ## 0.9.0 — 14/10/2026
 

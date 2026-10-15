@@ -1,4 +1,5 @@
 #include "batchrename.h"
+#include "renamehistory.h"
 #include "windowspath.h"
 #include <QDir>
 #include <QFileInfo>
@@ -28,13 +29,6 @@ RenameIdentity identity(const BY_HANDLE_FILE_INFORMATION &info) {
 QDateTime date(quint64 ticks) { return QDateTime::fromMSecsSinceEpoch(qint64(ticks / 10000) - 11644473600000LL).toLocalTime(); }
 QString winError() { return QStringLiteral("Erro do Windows %1. O item pode estar em uso ou sem permissão.").arg(GetLastError()); }
 QString key(const QString &path) { return QDir::cleanPath(path).toCaseFolded(); }
-QString snapshot(const QString &path, RenameIdentity &out) {
-    Handle handle(path, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE); BY_HANDLE_FILE_INFORMATION info{};
-    if (handle.value == INVALID_HANDLE_VALUE || !GetFileInformationByHandle(handle.value, &info)) return winError();
-    if (info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) return QStringLiteral("Links e junções não são renomeados em lote.");
-    if (!info.nFileIndexHigh && !info.nFileIndexLow) return QStringLiteral("O sistema de arquivos não confirmou uma identidade estável para o item.");
-    out = identity(info); return {};
-}
 QString available(const BatchRenameItem &item) {
     if (key(item.target) == key(item.source)) return {};
     const auto attrs = GetFileAttributesW(WindowsPath::forFileApi(item.target).toStdWString().c_str());
@@ -57,11 +51,34 @@ QString replaceLiteral(QStringView source, const BatchRenameOptions &options, bo
     }
     return output;
 }
-QString checkSource(const BatchRenameItem &item) {
-    RenameIdentity current; const auto error = snapshot(item.source, current);
-    if (!error.isEmpty()) return error;
-    return current == item.identity ? QString{} : QStringLiteral("A origem mudou desde a prévia. Gere uma nova prévia.");
+RenameProbe inspectRenameHandle(HANDLE nativeHandle) {
+    RenameProbe result;
+    BY_HANDLE_FILE_INFORMATION info{};
+    if (!GetFileInformationByHandle(nativeHandle, &info)) { result.error = winError(); return result; }
+    if (info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) { result.error = "Links e junções não são renomeados em lote."; return result; }
+    if (!info.nFileIndexHigh && !info.nFileIndexLow) { result.error = "O sistema de arquivos não confirmou uma identidade estável para o item."; return result; }
+    const auto required = GetFinalPathNameByHandleW(nativeHandle, nullptr, 0, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+    if (!required || required > 32768) { result.error = "Não foi possível confirmar o nome atual do item."; return result; }
+    std::vector<wchar_t> name(required + 1);
+    const auto length = GetFinalPathNameByHandleW(nativeHandle, name.data(), DWORD(name.size()), FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+    if (!length || length >= name.size()) { result.error = "Não foi possível confirmar o nome atual do item."; return result; }
+    result.actualName = QFileInfo(WindowsPath::fromFileApi(QString::fromWCharArray(name.data(), int(length)))).fileName();
+    result.identity = identity(info); result.state = RenameProbeState::Present; return result;
 }
+QString checkSource(const BatchRenameItem &item) {
+    const auto current = inspectRenameItem(item.source);
+    if (current.state != RenameProbeState::Present) return current.error;
+    return current.identity == item.identity && current.actualName == QFileInfo(item.source).fileName() ? QString{} : QStringLiteral("A origem ou seu nome mudou desde a prévia. Gere uma nova prévia.");
+}
+}
+RenameProbe inspectRenameItem(const QString &path) {
+    Handle handle(path, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE);
+    if (handle.value == INVALID_HANDLE_VALUE) {
+        const auto code = GetLastError();
+        RenameProbe result; result.state = code == ERROR_FILE_NOT_FOUND || code == ERROR_PATH_NOT_FOUND ? RenameProbeState::Missing : RenameProbeState::Failed;
+        result.error = QStringLiteral("Não foi possível confirmar o item (Windows %1).").arg(code); return result;
+    }
+    return inspectRenameHandle(handle.value);
 }
 bool BatchRenamePlan::valid() const {
     if (cancelled || !error.isEmpty() || items.isEmpty() || items.size() > 1000) return false;
@@ -95,7 +112,7 @@ BatchRenamePlan planBatchRename(const QStringList &sources, const BatchRenameOpt
         else if (seen.contains(key(item.source))) item.error = "Item duplicado na seleção.";
         if (parent.isEmpty()) parent = folder;
         seen.insert(key(item.source));
-        if (item.error.isEmpty()) item.error = snapshot(item.source, item.identity);
+        if (item.error.isEmpty()) { const auto probe = inspectRenameItem(item.source); if (probe.state != RenameProbeState::Present) item.error = probe.error; else item.identity = probe.identity; }
         QString base = info.fileName(), suffix;
         if (options.preserveExtension && !(item.identity.attributes & FILE_ATTRIBUTE_DIRECTORY)) {
             const int dot = base.lastIndexOf('.'); if (dot > 0) { suffix = base.mid(dot); base.truncate(dot); }
@@ -159,9 +176,11 @@ OperationResult performBatchRename(const BatchRenamePlan &plan, const std::atomi
         if (progress) progress(quint32(plan.items.size()), done, item.source);
         if (cancel) { result.state = OperationState::Cancelled; return result; }
         if (item.unchanged) { out.state = OperationItemState::Skipped; ++done; continue; }
-        Handle handle(item.source, DELETE | FILE_READ_ATTRIBUTES); BY_HANDLE_FILE_INFORMATION before{};
-        if (handle.value == INVALID_HANDLE_VALUE || !GetFileInformationByHandle(handle.value, &before)) out.error = winError();
-        else if (identity(before) != item.identity) out.error = "A origem mudou desde a prévia. Gere uma nova prévia.";
+        Handle handle(item.source, DELETE | FILE_READ_ATTRIBUTES);
+        const auto before = handle.value == INVALID_HANDLE_VALUE ? RenameProbe{} : inspectRenameHandle(handle.value);
+        if (handle.value == INVALID_HANDLE_VALUE) out.error = winError();
+        else if (before.state != RenameProbeState::Present) out.error = before.error;
+        else if (before.identity != item.identity || before.actualName != QFileInfo(item.source).fileName()) out.error = "A origem ou seu nome mudou desde a prévia. Gere uma nova prévia.";
         else {
             const auto nativeTarget = resolvedDirectory + (resolvedDirectory.endsWith('\\') ? QString{} : QStringLiteral("\\")) + item.name;
             const auto nameBytes = size_t(nativeTarget.size()) * sizeof(wchar_t);
@@ -170,11 +189,11 @@ OperationResult performBatchRename(const BatchRenamePlan &plan, const std::atomi
             rename->FileNameLength = DWORD(nameBytes); memcpy(rename->FileName, nativeTarget.utf16(), nameBytes);
             if (!SetFileInformationByHandle(handle.value, FileRenameInfo, rename, DWORD(storage.size()))) out.error = winError();
             else {
-                RenameIdentity after; const auto verification = snapshot(item.target, after);
+                const auto verification = inspectRenameItem(item.target); const auto &after = verification.identity;
                 // The write handle does not share deletion; verification only reads attributes.
-                if (!verification.isEmpty() || after.volume != item.identity.volume || after.indexHigh != item.identity.indexHigh || after.indexLow != item.identity.indexLow) {
+                if (verification.state != RenameProbeState::Present || after.volume != item.identity.volume || after.indexHigh != item.identity.indexHigh || after.indexLow != item.identity.indexLow || verification.actualName != item.name) {
                     out.state = OperationItemState::Incomplete; out.error = "O Windows renomeou o item, mas o destino não pôde ser confirmado.";
-                } else out.state = OperationItemState::Completed;
+                } else { out.state = OperationItemState::Completed; out.renamedIdentity = after; }
             }
         }
         if (!out.error.isEmpty()) { if (out.state != OperationItemState::Incomplete) out.state = OperationItemState::Failed; result.error = out.error; result.state = done ? OperationState::Incomplete : OperationState::Failed; return result; }
@@ -184,9 +203,9 @@ OperationResult performBatchRename(const BatchRenamePlan &plan, const std::atomi
     result.state = OperationState::Completed; return result;
 }
 BatchRenameJob::BatchRenameJob(QStringList sources, BatchRenameOptions options, QObject *parent) : QThread(parent), m_sources(std::move(sources)), m_options(std::move(options)) {}
-BatchRenameJob::BatchRenameJob(BatchRenamePlan plan, QObject *parent) : QThread(parent), m_apply(true), m_plan(std::move(plan)) {}
+BatchRenameJob::BatchRenameJob(BatchRenamePlan plan, QObject *parent, QString historyRoot) : QThread(parent), m_apply(true), m_historyRoot(std::move(historyRoot)), m_plan(std::move(plan)) {}
 BatchRenameJob::~BatchRenameJob() { cancel(); wait(); }
 void BatchRenameJob::run() {
-    if (m_apply) m_result = performBatchRename(m_plan, m_cancel, [this](quint32, quint32 done, const QString &) { m_done = int(done); });
+    if (m_apply) m_result = performRecordedBatchRename(m_plan, m_historyRoot, m_cancel, [this](quint32, quint32 done, const QString &) { m_done = int(done); });
     else m_plan = planBatchRename(m_sources, m_options, m_cancel);
 }

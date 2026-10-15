@@ -1,5 +1,7 @@
 #pragma once
 #include <QThread>
+#include "renameidentity.h"
+#include <optional>
 #include <QStringList>
 #include <QVector>
 #include <atomic>
@@ -24,6 +26,7 @@ struct OperationItemResult {
     OperationItemState state = OperationItemState::NotStarted;
     QString error;
     QString recycledParsingName;
+    std::optional<RenameIdentity> renamedIdentity;
 };
 struct OperationResult {
     OperationState state = OperationState::Failed;

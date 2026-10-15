@@ -5,7 +5,8 @@ não representa prazo ou promessa de recursos.
 
 ## Próxima etapa funcional
 
-- Miniaturas de PDF e aprimoramentos de navegação visual.
+- Pesquisa/seleção de texto no PDF, conforme escolha do renderizador e limites.
+- Aprimoramentos de navegação visual conforme uso real.
 
 ## Distribuição inicial
 
@@ -15,9 +16,13 @@ não representa prazo ou promessa de recursos.
 
 ## Etapas posteriores
 
-- Pesquisa/seleção de texto de PDF, conforme escolha do renderizador.
 - Ampliar a comparação conforme uso real; sincronização exige um fluxo próprio
   de prévia, conflitos e confirmação, sem reaproveitar resultados antigos como prova atual.
+
+## Já entregue na 0.12
+
+Histórico persistente e desfazer de novos lotes com prévia, confirmação e revalidação;
+miniaturas de PDF e vídeo em segundo plano, sem áudio.
 
 ## Já entregue na 0.11
 

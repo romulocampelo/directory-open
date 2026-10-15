@@ -61,6 +61,9 @@ private:
     QAction *m_renameAction = nullptr;
     QAction *m_batchRenameAction = nullptr;
     void startBatchRename();
+    QAction *m_renameHistoryAction = nullptr;
+    QString m_renameHistoryRoot;
+    void showRenameHistory();
     QAction *m_folderAction = nullptr;
     QAction *m_trashAction = nullptr;
     QAction *m_cancelOperation = nullptr;

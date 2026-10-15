@@ -15,11 +15,15 @@ pelo aplicativo e pelos testes; não representa um plugin ou SDK público.
 | Operações nativas e resultado comum por item | fileoperation |
 | Planejamento/identidade e motor nativo do lote | batchrename |
 | Prévia, confirmação e trabalhador exclusivo do lote | batchrenamedialog |
+| Registro, codec, reconciliação e reversão dos lotes | renamehistory |
+| Seleção/confirmação do desfazer e trabalhador | renamehistorydialog |
 | Reprodução local e propriedade do player/dispositivo | mediapreview |
+| Classificação de extensões de áudio/vídeo | mediatypes |
 | Confirmação, destino e conflitos | operationdialog |
 | Registro, backups, recuperação e concorrência da sessão | sessionstore |
 | Fatos, codec e catálogo das exibições por pasta | folderview |
-| Trabalhador, codec de texto e cache de PDF | previewloader |
+| Trabalhador e codec de texto | previewloader |
+| Documento PDF, cache por conteúdo, WinRT e normalização DPI | pdfrenderer |
 | Controles e pintura limitada ao viewport | previewwidget |
 | Dimensões, escala e orientação EXIF compartilhadas | imagepreview |
 | Trabalhador, frescor e orçamento de miniaturas | thumbnailcache |
@@ -95,7 +99,8 @@ acontecem no trabalhador, com resultado lido após wait, confirmação invalidad
 qualquer mudança e progresso por contador. Linhas são indexadas pela origem; a UI
 não refaz geração/validação. selectedPaths ordena os índices pela linha no produtor,
 de modo que consumidores recebam a ordem da apresentação, inclusive nas miniaturas.
-Cancelamento conserva o que já terminou; sem transação global/desfazer automático.
+Cancelamento conserva o que já terminou; sem transação global. Desfazer é um fluxo
+explícito do histórico, com nova prévia/seleção/confirmação.
 
 MediaPreview só é criado para uma extensão de mídia candidata. Cada seleção cria
 um player próprio, ligado a QFile somente leitura, e destrói o anterior antes de
@@ -110,6 +115,57 @@ de mídia invalida esse trabalho e não aceita seus resultados. Não criar backe
 mídia ao selecionar texto/imagem/PDF ou ao abrir o aplicativo sem mídia. Formatos e
 codecs dependem das bibliotecas reais; fixtures WAV e AVI/MJPEG não provam MP4/H.264,
 HEVC ou todos os dispositivos. APIs Qt usadas permanecem compatíveis com Qt 6.8.
+
+## Histórico de renomeações
+
+renamehistory é o único dono do formato versionado, parsing, limites e reconciliação.
+Antes de qualquer mutação grava um mapa prepared; depois recebe as identidades
+finais do resultado nativo e grava finished, com cópia anterior .bak. Usa QSaveFile
+e QLockFile durante toda a execução/reversão. Uma falha de gravação antes impede
+o trabalho; depois distingue resultado incompleto e preserva o mapa anterior.
+Não há escrita de JSON por item nem fila de resultados de renomeação.
+
+Campos Win32 de 64 bits são strings decimais, nunca doubles JSON. Registros são
+limitados a 8 MiB, 1.000 itens e 4 MiB UTF-16 de origem+destino; o catálogo para
+em 1.001 nomes para detectar capacidade sem enumerar indefinidamente. Até
+1.000 registros, sem descarte automático. Leituras do catálogo retêm um registro
+por vez e resumos limitados. Formatos desconhecidos/malformados não são sobrescritos.
+
+inspectRenameItem, no motor batchrename, produz identidade e nome real pelo mesmo
+handle. A reconciliação distingue nome original restaurado, nome final disponível
+para reversão, inalterado e bloqueado. Comparações conservadoras de caminhos evitam
+colisões de maiúsculas; o nome exato do disco resolve o caso de renomeação apenas
+de caixa. A prova usa volume/índice, atributos, tamanho, modificação e criação, sem
+hash integral dos arquivos. Não trata metadados como prova criptográfica de conteúdo.
+
+Ao aplicar a reversão, recarrega o registro sob lock, confere seu SHA-256 contra a
+prévia, revalida os itens marcados e monta um BatchRenamePlan reverso. O mesmo
+motor nativo faz a última conferência e renomeia sem substituir destinos. O mapa
+fica intacto para reconsultar após cancelamento/crash; não é uma pilha cega de undo.
+O histórico não pode renomear a própria pasta ou seus ancestrais, incluindo caminhos
+resolvidos. Sem sessão, a composição passa root vazio e mantém o lote sem journal;
+testes/capturas não abrem o histórico pessoal.
+
+## Miniaturas de PDF e vídeo
+
+ThumbnailSource carrega a classificação produzida por metadados (Image/Pdf/Video);
+a chave inclui caminho/tamanho/mtime/tipo. mediatypes é o único catálogo de extensões
+de áudio/vídeo usado pelo visualizador e miniaturas. Mantêm-se um trabalhador,
+fila substituível 128/painel–256 total, um resultado e cache 64 MiB/256 entradas.
+
+PdfRenderer vive no trabalhador que o usa; pimpl encapsula WinRT e cache de um
+documento por SHA-256 dos bytes limitados a 64 MiB. Libera documento/stream antes
+de desmontar o apartamento. O escopo DPI pertence ao renderizador compartilhado,
+que normaliza DIPs antes da alocação. Visualizador pede 1800×2400; miniatura pede
+primeira página até 256×256, convertida para ARGB32. Arquivo não fica aberto no PDF.
+
+Vídeo usa QMediaPlayer/QVideoSink locais no trabalhador, com loop de eventos e
+sem QAudioOutput. Consome um quadro válido, converte até 16 megapixels, reduz a
+256×256 e descarta o QVideoFrame. Leitura por QFile, sem carregar o vídeo inteiro.
+Prazo de espera de 8 s e cancelamento cooperativo verificado a cada 25 ms; teardown
+do backend nativo não é uma interrupção forçada. Player é destruído antes do arquivo.
+Erros ficam no mesmo cache limitado; renderização/codec/GPU consomem memória além
+do orçamento de bitmaps. Não instanciar esse backend ao abrir uma lista sem vídeo.
 
 ## Testes e evidência
 

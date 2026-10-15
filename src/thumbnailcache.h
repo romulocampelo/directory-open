@@ -11,9 +11,11 @@
 #include <QWaitCondition>
 #include <optional>
 
+enum class ThumbnailKind { Image, Pdf, Video };
 struct ThumbnailSource {
     QString path;
     qint64 size = 0, modified = 0;
+    ThumbnailKind kind = ThumbnailKind::Image;
     bool operator==(const ThumbnailSource &) const = default;
 };
 size_t qHash(const ThumbnailSource &source, size_t seed = 0);

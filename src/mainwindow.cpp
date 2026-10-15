@@ -2,6 +2,7 @@
 #include "filepanel.h"
 #include "operationdialog.h"
 #include "batchrenamedialog.h"
+#include "renamehistorydialog.h"
 #include "favoritesdialog.h"
 #include "searchdialog.h"
 #include "comparisondialog.h"
@@ -41,6 +42,7 @@
 #include <QVBoxLayout>
 
 MainWindow::MainWindow(const QString &left, const QString &right, bool nativeOperationUi, const QString &sessionFile) : m_nativeOperationUi(nativeOperationUi), m_sessionStore(sessionFile) {
+    if (!sessionFile.isEmpty()) m_renameHistoryRoot = QFileInfo(sessionFile).absoluteFilePath() + ".rename-history";
     m_clipboard = new FileClipboard(this);
     setWindowTitle(tr("Directory Open — Arquivos")); resize(1400, 820);
     setDockOptions(QMainWindow::AllowNestedDocks);
@@ -165,7 +167,8 @@ MainWindow::MainWindow(const QString &left, const QString &right, bool nativeOpe
     connect(dark, &QAction::toggled, this, &MainWindow::applyTheme);
     auto *folderMenu = menuBar()->addMenu(tr("&Pastas")); folderMenu->addAction(newTab); folderMenu->addAction(m_folderAction); folderMenu->addAction(refresh);
     auto *compare = action("compareFolders", tr("Comparar pastas…"), QStyle::SP_FileDialogDetailedView, QKeySequence("Ctrl+Shift+K"), [this] { showComparison(); });
-    auto *toolsMenu = menuBar()->addMenu(tr("&Ferramentas")); toolsMenu->addAction(search); toolsMenu->addAction(compare); toolsMenu->addAction(m_batchRenameAction); toolsMenu->addAction(copyPath);
+    m_renameHistoryAction = action("renameHistory", tr("Histórico de renomeações…"), QStyle::SP_BrowserReload, QKeySequence("Ctrl+Shift+R"), [this] { showRenameHistory(); });
+    auto *toolsMenu = menuBar()->addMenu(tr("&Ferramentas")); toolsMenu->addAction(search); toolsMenu->addAction(compare); toolsMenu->addAction(m_batchRenameAction); toolsMenu->addAction(m_renameHistoryAction); toolsMenu->addAction(copyPath);
     auto *helpMenu = menuBar()->addMenu(tr("A&juda")); helpMenu->addAction(tr("Sobre o Directory Open"), this, [this] {
         QMessageBox::about(this, tr("Directory Open"), tr("Directory Open %1\nGerenciador de arquivos aberto.\n\nNavegação, operações de arquivos, visualização, comparação de pastas e sessão.").arg(QString::fromLatin1(DIROPEN_VERSION)));
     });
@@ -246,8 +249,18 @@ void MainWindow::updateOperationActions() {
     m_moveAction->setEnabled(available && !selected.isEmpty());
     m_renameAction->setEnabled(available && selected.size() == 1);
     m_batchRenameAction->setEnabled(available && !selected.isEmpty() && selected.size() <= 1000);
+    m_renameHistoryAction->setEnabled(available && !m_renameHistoryRoot.isEmpty());
     m_trashAction->setEnabled(available && !selected.isEmpty());
     m_folderAction->setEnabled(available && QFileInfo(m_active->path()).isDir());
+}
+void MainWindow::showRenameHistory() {
+    if (m_operationJob || m_confirming || m_viewerDialog || m_renameHistoryRoot.isEmpty()) return;
+    m_previewWidget->releaseMedia();
+    {
+        QScopedValueRollback<bool> guard(m_confirming,true); updateOperationActions();
+        RenameHistoryDialog dialog(m_renameHistoryRoot,this); dialog.exec();
+    }
+    m_left->refresh(); m_right->refresh(); updateOperationActions();
 }
 void MainWindow::startBatchRename() {
     if (m_operationJob || m_confirming || m_viewerDialog) return;
@@ -256,7 +269,7 @@ void MainWindow::startBatchRename() {
     m_previewWidget->releaseMedia();
     {
         QScopedValueRollback<bool> confirming(m_confirming, true); updateOperationActions();
-        BatchRenameDialog dialog(sources, this); dialog.exec();
+        BatchRenameDialog dialog(sources, this, m_renameHistoryRoot); dialog.exec();
     }
     m_left->refresh(); m_right->refresh(); updateOperationActions();
 }

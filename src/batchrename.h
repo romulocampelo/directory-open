@@ -12,11 +12,6 @@ struct BatchRenameOptions {
     QDate fixedDate = QDate::currentDate();
     QString dateFormat = "yyyy-MM-dd";
 };
-struct RenameIdentity {
-    quint32 volume = 0, indexHigh = 0, indexLow = 0, attributes = 0;
-    quint64 bytes = 0, modified = 0, created = 0;
-    bool operator==(const RenameIdentity &) const = default;
-};
 struct BatchRenameItem {
     QString source, target, name, error;
     RenameIdentity identity;
@@ -29,13 +24,20 @@ struct BatchRenamePlan {
     bool valid() const;
     int changes() const;
 };
+enum class RenameProbeState { Present, Missing, Failed };
+struct RenameProbe {
+    RenameProbeState state = RenameProbeState::Failed;
+    RenameIdentity identity;
+    QString actualName, error;
+};
+RenameProbe inspectRenameItem(const QString &path);
 BatchRenamePlan planBatchRename(const QStringList &sources, const BatchRenameOptions &, const std::atomic_bool &cancel);
 OperationResult performBatchRename(const BatchRenamePlan &, const std::atomic_bool &cancel, const OperationProgress &progress = {});
 class BatchRenameJob final : public QThread {
     Q_OBJECT
 public:
     BatchRenameJob(QStringList sources, BatchRenameOptions options, QObject *parent = nullptr);
-    BatchRenameJob(BatchRenamePlan plan, QObject *parent = nullptr);
+    BatchRenameJob(BatchRenamePlan plan, QObject *parent = nullptr, QString historyRoot = {});
     ~BatchRenameJob() override;
     void cancel() { m_cancel = true; }
     const BatchRenamePlan &plan() const { return m_plan; } // After wait only.
@@ -45,6 +47,7 @@ protected:
     void run() override;
 private:
     bool m_apply = false;
+    QString m_historyRoot;
     QStringList m_sources;
     BatchRenameOptions m_options;
     BatchRenamePlan m_plan;
