@@ -1,4 +1,5 @@
 #include "filesearch.h"
+#include "windowspath.h"
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFileInfo>
@@ -9,7 +10,7 @@
 
 namespace {
 namespace fs = std::filesystem;
-QString displayPath(const fs::path &path) { return QDir::fromNativeSeparators(QString::fromStdWString(path.native())); }
+QString displayPath(const fs::path &path) { return WindowsPath::fromFileApi(QString::fromStdWString(path.native())); }
 bool isReparsePoint(const fs::path &path, std::error_code &error) {
     const auto attributes = GetFileAttributesW(path.c_str());
     if (attributes == INVALID_FILE_ATTRIBUTES) { error = std::error_code(int(GetLastError()), std::system_category()); return false; }
@@ -29,7 +30,7 @@ SearchSummary searchFiles(const SearchRequest &request, const std::atomic_bool &
         recordError(request.root, "Escolha uma pasta e um nome para buscar."); return summary;
     }
     if (cancel) { summary.state = SearchState::Cancelled; return summary; }
-    const fs::path root(QDir::toNativeSeparators(request.root).toStdWString());
+    const fs::path root(WindowsPath::forFileApi(request.root).toStdWString());
     std::error_code error;
     const bool rootLink = isReparsePoint(root, error);
     if (error || rootLink || !fs::is_directory(root, error) || error) {
