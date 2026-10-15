@@ -1,5 +1,18 @@
 # Histórico do Directory Open
 
+## 0.10.0 — comparação de pastas
+
+- Comparar as pastas dos dois painéis por tamanho/data ou por bytes, com inclusão
+  opcional de subpastas, itens exclusivos, tipos diferentes e resultados por caminho.
+- Distinguir coincidência de metadados de conteúdo conferido; pastas correspondentes
+  não estabelecem igualdade automática de toda a árvore.
+- Filtrar diferenças e pendências; abrir cada resultado em nova aba do painel escolhido.
+- Trabalhador com cancelamento, limites explícitos e encerramento aguardado. Erros,
+  arquivos em uso, links/junções e cobertura parcial não confirmam igualdade ou ausência.
+- Corrigir caminhos longos da busca no limite Win32, sem depender da política global
+  do Windows; representação compartilhada com a comparação.
+
+
 As versões abaixo foram entregues e testadas localmente no Windows. Ainda não
 há publicação no GitHub nem pacote validado em outro computador.
 

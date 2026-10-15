@@ -1,4 +1,4 @@
-# Manual do Directory Open 0.9
+# Manual do Directory Open 0.10
 
 ## Recursos e atalhos
 
@@ -25,6 +25,7 @@
 - Arrastar entre os painéis, com cópia padrão e movimentação com Shift.
 - Busca por nome em subpastas, em segundo plano, com cancelamento e resultados em nova aba.
 - Favoritos editáveis na barra e na lateral, guardados junto da sessão.
+- Comparação de pastas por tamanho/data ou conteúdo, com subpastas e cancelamento.
 - Exibição por pasta: detalhes, somente nomes ou miniaturas, com tamanho, colunas e ordenação compartilhados entre painéis.
 
 Atalhos: Ctrl+T nova aba, Ctrl+W fechar aba, Ctrl+L endereço, Ctrl+F filtro,
@@ -37,6 +38,7 @@ Ctrl+C copia arquivos, Ctrl+X prepara o recorte e Ctrl+V cola no painel ativo.
 Esses três atalhos só atuam em arquivos quando a lista tem o foco; nos campos
 de texto, mantêm a edição normal. O botão Colar também está na barra de comandos.
 Ctrl+Shift+F abre a busca recursiva; Ctrl+D adiciona a pasta atual aos favoritos.
+Ctrl+Shift+K abre a comparação das pastas dos dois painéis.
 
 ## Visualizar arquivos
 
@@ -113,6 +115,56 @@ Os favoritos são persistidos ao fechar normalmente o aplicativo, com a mesma
 proteção e cópia de segurança da sessão. Sessões anteriores recebem os atalhos
 iniciais uma vez; uma lista vazia salva continua vazia. Caminhos indisponíveis
 permanecem guardados, e abrir um deles mostra um aviso sem substituir a pasta atual.
+
+## Comparar pastas
+
+Abra as duas pastas nos painéis e clique em **Comparar pastas…** na barra ou em
+**Ferramentas**; o atalho é **Ctrl+Shift+K**. Os dois endereços podem ser alterados
+na janela. Marque **Incluir subpastas** para percorrer toda a árvore ou desmarque
+para comparar apenas o nível atual. Itens ocultos são incluídos; links e junções
+não são seguidos nem comparados. A própria raiz não pode ser link/junção.
+
+Clique em **Comparar**. Cada linha mostra o caminho relativo, o resultado e os
+metadados de cada lado. **Somente à esquerda/direita** significa que a ausência
+foi confirmada no escopo lido. Nomes devem corresponder exatamente, inclusive
+maiúsculas/minúsculas: nomes diferentes são itens distintos. Pastas correspondentes
+aparecem como **Pasta em ambos**; essa linha não confirma igualdade da árvore.
+Os arquivos internos têm seus próprios resultados.
+
+O modo inicial compara tamanho e data de modificação. **Tamanho/data iguais**
+é uma coincidência de metadados; o conteúdo permanece não conferido.
+**Tamanho/data diferentes** também não significa, por si só, bytes diferentes.
+Marque **Conferir conteúdo dos arquivos** e execute novamente para comparar bytes
+inclusive quando as datas forem diferentes. Tamanhos distintos comprovam diferença
+sem leitura de conteúdo. Para arquivos de tamanho igual, todos os bytes precisam
+coincidir para aparecer **Conteúdo igual (bytes conferidos)**; uma divergência
+permite encerrar a leitura daquele par. Não usa apenas hashes nem amostras.
+
+**Mostrar somente diferenças e pendências** esconde as correspondências, incluindo
+coincidências de tamanho/data no modo inicial. Desmarque para inspecioná-las.
+Selecione um resultado e use **Abrir à esquerda/direita em nova aba** para abrir
+sua pasta no painel correspondente. Um resultado de pasta abre a própria pasta;
+um arquivo abre a pasta que o contém. O botão do lado ausente fica desabilitado.
+
+Erros, arquivos em uso ou alterados durante a conferência são **Não confirmado**.
+Uma pasta sem acesso não é tratada como vazia: itens correspondentes encontrados
+no outro lado ficam pendentes se sua ausência não puder ser confirmada.
+**Cancelar comparação** preserva apenas os resultados já examinados e indica
+parcialidade. Fechar aguarda o trabalhador encerrar, sem abandonar a leitura.
+Uma chamada de rede em andamento pode precisar terminar antes do cancelamento.
+
+Limites: 5.000 itens por lado, 128 níveis e orçamento de 2.097.152 caracteres UTF-16
+por inventário para caminhos e chaves. Até 10.000 linhas e 20 detalhes de erros.
+Limites atingidos são explícitos e não confirmam ausência em trechos não lidos.
+A leitura usa blocos de 256 KiB por lado; não carrega arquivos inteiros em memória.
+Durante a conferência, os arquivos abertos não aceitam compartilhamento de escrita
+ou exclusão; programas que já escrevem podem impedir a leitura estável.
+
+A comparação é uma observação durante a leitura, sem snapshot atômico das duas
+árvores e sem acompanhamento posterior. Alterações externas podem tornar um
+resultado antigo; compare novamente para atualizar. Esta etapa inspeciona os dados:
+não copia, move, apaga nem sincroniza arquivos. Use os comandos existentes dos
+painéis para qualquer operação posterior, com as confirmações habituais.
 
 ## Miniaturas de imagens
 

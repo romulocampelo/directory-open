@@ -3,6 +3,7 @@
 #include "operationdialog.h"
 #include "favoritesdialog.h"
 #include "searchdialog.h"
+#include "comparisondialog.h"
 #include "previewwidget.h"
 #include "thumbnailcache.h"
 #include <QDialog>
@@ -161,9 +162,10 @@ MainWindow::MainWindow(const QString &left, const QString &right, bool nativeOpe
     m_darkAction = dark;
     connect(dark, &QAction::toggled, this, &MainWindow::applyTheme);
     auto *folderMenu = menuBar()->addMenu(tr("&Pastas")); folderMenu->addAction(newTab); folderMenu->addAction(m_folderAction); folderMenu->addAction(refresh);
-    auto *toolsMenu = menuBar()->addMenu(tr("&Ferramentas")); toolsMenu->addAction(search); toolsMenu->addAction(copyPath);
+    auto *compare = action("compareFolders", tr("Comparar pastas…"), QStyle::SP_FileDialogDetailedView, QKeySequence("Ctrl+Shift+K"), [this] { showComparison(); });
+    auto *toolsMenu = menuBar()->addMenu(tr("&Ferramentas")); toolsMenu->addAction(search); toolsMenu->addAction(compare); toolsMenu->addAction(copyPath);
     auto *helpMenu = menuBar()->addMenu(tr("A&juda")); helpMenu->addAction(tr("Sobre o Directory Open"), this, [this] {
-        QMessageBox::about(this, tr("Directory Open"), tr("Directory Open %1\nGerenciador de arquivos aberto.\n\nNavegação, abas, operações de arquivos, busca, favoritos e sessão.").arg(QString::fromLatin1(DIROPEN_VERSION)));
+        QMessageBox::about(this, tr("Directory Open"), tr("Directory Open %1\nGerenciador de arquivos aberto.\n\nNavegação, operações de arquivos, visualização, comparação de pastas e sessão.").arg(QString::fromLatin1(DIROPEN_VERSION)));
     });
     auto *toolbar = addToolBar(tr("Comandos")); toolbar->setObjectName("commands");
     toolbar->setMovable(false); toolbar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon); toolbar->setIconSize(QSize(18, 18));
@@ -171,7 +173,7 @@ MainWindow::MainWindow(const QString &left, const QString &right, bool nativeOpe
     toolbar->addActions({m_moveAction, m_renameAction, m_folderAction, m_trashAction});
     toolbar->addSeparator(); toolbar->addAction(m_pasteAction); toolbar->addAction(copyPath); toolbar->addAction(refresh); toolbar->addAction(m_cancelOperation); toolbar->addSeparator();
     toolbar->addAction(dual);
-    toolbar->addAction(search);
+    toolbar->addAction(search); toolbar->addAction(compare);
     auto *favorites = new QToolButton(this); favorites->setText(tr("Favoritos")); favorites->setIcon(style()->standardIcon(QStyle::SP_DirHomeIcon));
     favorites->setToolButtonStyle(Qt::ToolButtonTextBesideIcon); favorites->setPopupMode(QToolButton::InstantPopup);
     m_favoritesMenu = new QMenu(favorites); m_favoritesMenu->setObjectName("favoritesMenu");
@@ -361,6 +363,17 @@ void MainWindow::addCurrentFavorite() {
 void MainWindow::editFavorites() {
     FavoritesDialog dialog(m_favorites, m_active->path(), this);
     if (dialog.exec() == QDialog::Accepted) { m_favorites = dialog.favorites(); refreshFavorites(); statusBar()->showMessage(tr("Favoritos atualizados. Serão salvos ao fechar o Directory Open.")); }
+}
+void MainWindow::showComparison() {
+    if (!m_comparisonDialog) {
+        m_comparisonDialog = new ComparisonDialog(m_left->path(), m_right->path(), this);
+        connect(m_comparisonDialog, &ComparisonDialog::openFolderRequested, this, [this](const QString &path, bool left) {
+            auto *panel = left ? m_left : m_right;
+            if (!left) m_dualAction->setChecked(true);
+            panel->newTab(path); activate(panel);
+        });
+    }
+    m_comparisonDialog->show(); m_comparisonDialog->raise(); m_comparisonDialog->activateWindow();
 }
 void MainWindow::showSearch() {
     if (!m_searchDialog) {

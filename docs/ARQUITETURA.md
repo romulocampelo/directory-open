@@ -22,6 +22,9 @@ pelo aplicativo e pelos testes; não representa um plugin ou SDK público.
 | Trabalhador, frescor e orçamento de miniaturas | thumbnailcache |
 | Demanda do viewport e pintura/seleção das células | thumbnailview |
 | Busca por nome e sua interface | filesearch / searchdialog |
+| Inventário, fatos de comparação e trabalhador | foldercomparison |
+| Controles e resultados da comparação | comparisondialog |
+| Representação de caminhos nas APIs Win32 e na interface | windowspath |
 | Organizadores de favoritos e exibições | favoritesdialog / folderviewsdialog |
 
 ## Contratos essenciais
@@ -46,6 +49,31 @@ pelo aplicativo e pelos testes; não representa um plugin ou SDK público.
   redefinir a aceitação de drop no viewport. Uma política atende tabela e grade.
 - O delegado de miniaturas pinta explicitamente a seleção: alguns estilos nativos
   omitem o destaque quando o layout de texto/ícone padrão é substituído.
+
+## Comparação de pastas
+
+foldercomparison é dono do inventário e da prova: tamanho/data não estabelecem
+igualdade de conteúdo. A UI consome classificações e descrições prontas. Nomes
+são exatos para preservar diretórios Windows com sensibilidade a maiúsculas.
+A cobertura de cada inventário conserva prefixos não examinados; limite global
+invalida a prova de ausência naquele lado, sem descartar correspondências vistas.
+Um link, erro ou limite de profundidade bloqueia a inferência de ausência abaixo
+dele. Pastas correspondentes não recebem uma igualdade agregada indevida.
+
+Um trabalhador mantém um relatório limitado, transferido depois de finished/wait.
+A UI consulta dois contadores atômicos a cada 150 ms: não há fila de lotes de
+resultados ou atualizações por bloco no loop de eventos. Blocos de conteúdo são
+de 256 KiB por lado; a leitura para na primeira diferença ou no cancelamento.
+Arquivos usam handles com FILE_SHARE_READ e OPEN_REPARSE_POINT, com metadados e
+identidade do handle verificados antes/depois; alterações detectadas são desconhecidas.
+A travessia revalida diretórios antes de entrar. Não representa snapshot atômico
+nem isolamento contra alterações externas de toda a árvore entre as leituras.
+Destrutores cancelam e aguardam o trabalhador, inclusive com resultado ainda não entregue.
+
+windowspath normaliza caminhos absolutos na fronteira Win32: prefixos estendidos
+permitem caminhos longos sem depender da política do Windows hospedeiro; apenas
+esses prefixos são retirados para exposição ao usuário. Busca e comparação usam
+o mesmo proprietário dessa representação.
 
 ## Testes e evidência
 

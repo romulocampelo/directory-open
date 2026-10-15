@@ -8,9 +8,9 @@ são necessários para desenvolvimento. MinGW, Linux e macOS não são suportado
 operações e PDF usam APIs nativas do Windows.
 
 Ambiente local validado: Qt 6.12.0, MSVC v143 14.44.35207, Windows SDK instalado,
-CMake e Ninja. O workflow preparado usa Qt 6.8.3/MSVC no Windows 2022; não foi
-executado no GitHub. Verificar seu resultado no primeiro envio; configuração não
-é prova de execução.
+CMake e Ninja. O workflow usa Qt 6.8.3/MSVC no Windows 2022.
+Consulte os [resultados de cada commit](https://github.com/romulocampelo/directory-open/actions/workflows/windows.yml);
+um resultado anterior não valida automaticamente alterações posteriores.
 
 build.cmd descobre Visual Studio por vswhere, aceita Qt de QT_ROOT_DIR e procura
 Ninja instalado. Prefere MSVC 14.44 quando presente, ou o padrão da instalação
@@ -59,8 +59,9 @@ ctest --test-dir build --output-on-failure
 
 ## Verificação
 
-CTest contém oito suítes: navegação, operações nativas, sessão, clipboard/arraste,
-busca/favoritos, exibição por pasta, miniaturas e visualizador. Fixtures e sessões
+CTest contém nove suítes: navegação, operações nativas, sessão, clipboard/arraste,
+busca/favoritos, exibição por pasta, miniaturas, visualizador e comparação de pastas.
+Fixtures e sessões
 alternativas preservam dados pessoais. Os XMLs de resultado ficam em build.
 Testes de clipboard preservam/restauram formatos em memória. Testes de Lixeira
 usam itens próprios e restauram somente esses itens.
@@ -76,10 +77,12 @@ $env:QT_QPA_PLATFORM_PLUGIN_PATH = "$env:NAVEGA_QT_DIR\plugins\platforms"
 & .\build\thumbnail_tests.exe
 & .\build\preview_tests.exe
 & .\build\transfer_tests.exe
+& .\build\comparison_tests.exe
 ~~~
 
 Para uma captura opcional, defina DIROPEN_THUMBNAIL_CAPTURE ou
 DIROPEN_PREVIEW_CAPTURE com um destino local antes da suíte correspondente.
+DIROPEN_COMPARISON_CAPTURE captura a comparação com endereços ilustrativos.
 CI não substitui testes interativos nem pacote numa máquina sem ferramentas de
 desenvolvimento. Um aviso OLE foi observado na limpeza do clipboard em testes
 nativos anteriores, sem falha; não considerar sua causa ou correção estabelecidas.

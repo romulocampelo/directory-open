@@ -1,6 +1,6 @@
 # Preparar um lançamento
 
-A versão 0.9 está em desenvolvimento. Preparar/publicar o repositório de fontes
+A versão 0.10 está em desenvolvimento. Preparar/publicar o repositório de fontes
 não equivale a oferecer um pacote de executáveis validado para outros computadores.
 
 ## Repositório de fontes
@@ -10,13 +10,12 @@ Conferir arquivos e histórico que serão enviados. Não incluir builds, sessõe
 relatórios locais ou instaladores de outros produtos. O repositório deve ter
 histórico próprio, sem herdar um projeto diferente.
 
-Antes do primeiro envio, escolher conta/organização e criar um repositório vazio
-chamado directory-open. Conectar a URL real como origin e enviar main. Não criar
-README/licença extras no GitHub, pois esses arquivos já existem aqui. O envio é
-uma ação separada, depois de decidir conta e visibilidade.
+O repositório público de fontes é [romulocampelo/directory-open](https://github.com/romulocampelo/directory-open),
+com main como branch principal. Ele tem histórico independente. Para novas
+versões, enviar apenas revisões verificadas desse projeto.
 
 O workflow compila/testa em Windows 2022 com Qt 6.8.3 e ações fixadas por commit.
-Conferir sua primeira execução; até lá não afirmar que a CI passou. Não usar o
+Conferir o resultado da revisão exata nos [Actions](https://github.com/romulocampelo/directory-open/actions). Não usar o
 workflow para publicar Releases ou instalar software no computador do usuário.
 
 ## Pacote para download
@@ -34,7 +33,7 @@ workflow para publicar Releases ou instalar software no computador do usuário.
    segundo os termos de redistribuição Microsoft. O SDK Windows não é um requisito
    de uso normal do aplicativo; é usado na compilação.
 6. Testar o pacote em outro Windows, sem Qt/Visual Studio no PATH: abertura, sessão,
-   miniaturas, PDF, foco/F11, copiar/mover, cancelamento, conflitos e Lixeira usando
+   miniaturas, PDF, comparação de pastas, foco/F11, copiar/mover, cancelamento, conflitos e Lixeira usando
    somente dados de demonstração.
 7. Gerar hash SHA-256, escrever notas/limitações e anexar o pacote à Release.
    Marcar o primeiro download como pré-lançamento. Não versionar o pacote no Git.

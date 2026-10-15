@@ -7,13 +7,15 @@ nativas e visualizador de imagens, texto e PDF. **DirOpen** é a forma curta e
 Projeto independente, inspirado na organização de gerenciadores como o Directory
 Opus. Não é produto da GPSoftware e não contém código, imagens ou componentes do Opus.
 
-**Versão 0.9.0 — em desenvolvimento.** O código foi compilado e testado localmente
-no Windows. Ainda não há pacote de download validado em outra máquina. O workflow
-do GitHub está preparado; sua execução no serviço ainda precisa ser confirmada.
+**Versão 0.10.0 — em desenvolvimento.** O código foi compilado e testado localmente
+no Windows. Ainda não há pacote de download validado em outra máquina. A compilação e os testes também são executados no GitHub Actions.
+Veja o [resultado mais recente](https://github.com/romulocampelo/directory-open/actions/workflows/windows.yml).
 
 ![Miniaturas e detalhes no tema claro](docs/images/interface-light.png)
 
 ![Tema escuro](docs/images/interface-dark.png)
+
+![Comparação de pastas e conteúdo](docs/images/folder-comparison.png)
 
 As capturas usam imagens e caminhos ilustrativos de demonstração.
 
@@ -24,14 +26,15 @@ As capturas usam imagens e caminhos ilustrativos de demonstração.
   progresso, cancelamento e resultados por item.
 - Área de transferência do Windows e arraste entre painéis.
 - Busca por nome em subpastas e favoritos editáveis.
+- Comparação de pastas por tamanho/data ou conteúdo, com subpastas e cancelamento.
 - Exibição guardada por pasta, incluindo colunas e tamanho das miniaturas.
 - Miniaturas de imagens, com carregamento em segundo plano e cache limitado.
 - Visualizador de imagens, texto e PDF: F7 no painel, F3 ampliado e F11 em tela cheia.
 - Sessão com backup, gravação atômica e proteção contra sobrescrita concorrente.
 
 Os limites e comportamentos estão no [manual de uso](docs/USO.md). PDF não tem
-pesquisa/seleção de texto; áudio/vídeo, Office, arquivos compactados e comparação
-de pastas ainda não foram implementados. Não há paridade de recursos com o Opus.
+pesquisa/seleção de texto; áudio/vídeo, Office e arquivos compactados ainda não
+foram implementados. Não há paridade de recursos com o Opus.
 
 ## Compilar e executar
 
@@ -60,7 +63,9 @@ runtime MSVC e as bibliotecas incluídas no pacote; o SDK é para desenvolviment
 
 ## Desenvolvimento e contribuição
 
-A base local passou oito suítes, com 128 casos distintos e complementação nativa.
+A versão 0.10 reúne nove suítes e 145 casos distintos. A execução local passou,
+com cinco omissões explícitas nos testes offscreen; a comparação também foi
+verificada no desktop Windows, incluindo o atalho. Veja [como verificar](docs/COMPILAR.md).
 A verificação automática compila e executa CTest no Windows; ela não comprova um
 instalador, um segundo computador nem todos os fluxos interativos do desktop.
 

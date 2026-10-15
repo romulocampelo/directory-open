@@ -20,6 +20,7 @@ class QSplitter;
 class QMenu;
 class QListWidget;
 class SearchDialog;
+class ComparisonDialog;
 class MainWindow final : public QMainWindow {
     Q_OBJECT
 public:
@@ -74,6 +75,8 @@ private:
     void openFavorite(const QString &id);
     void addCurrentFavorite();
     void editFavorites();
+    QPointer<ComparisonDialog> m_comparisonDialog;
+    void showComparison();
     void showSearch();
     void finishClose(QCloseEvent *event);
     void showFileContextMenu(const QPoint &position);

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(DirOpen VERSION 0.9.0 LANGUAGES CXX)
+project(DirOpen VERSION 0.10.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -10,6 +10,7 @@ target_sources(diropen_ui PRIVATE src/filesearch.cpp src/filesearch.h src/search
 target_sources(diropen_ui PRIVATE src/folderview.cpp src/folderview.h src/folderviewsdialog.cpp src/folderviewsdialog.h)
 target_sources(diropen_ui PRIVATE src/previewloader.cpp src/previewloader.h src/previewwidget.cpp src/previewwidget.h)
 target_sources(diropen_ui PRIVATE src/imagepreview.cpp src/imagepreview.h src/thumbnailcache.cpp src/thumbnailcache.h src/thumbnailview.cpp src/thumbnailview.h)
+target_sources(diropen_ui PRIVATE src/foldercomparison.cpp src/foldercomparison.h src/comparisondialog.cpp src/comparisondialog.h src/windowspath.h)
 target_link_libraries(diropen_ui PUBLIC Qt6::Widgets)
 target_include_directories(diropen_ui PUBLIC src)
 target_compile_definitions(diropen_ui PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
@@ -98,4 +99,13 @@ if(BUILD_TESTING)
   set_tests_properties(file_preview PROPERTIES TIMEOUT 90
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins/platforms")
 
+  qt_add_executable(comparison_tests tests/comparison_test.cpp)
+  target_link_libraries(comparison_tests PRIVATE diropen_ui Qt6::Test advapi32 psapi)
+  target_compile_definitions(comparison_tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+  if(MSVC)
+    target_compile_options(comparison_tests PRIVATE /utf-8 /W4)
+  endif()
+  add_test(NAME folder_comparison COMMAND comparison_tests -o "${CMAKE_CURRENT_BINARY_DIR}/comparison-results.xml,junitxml")
+  set_tests_properties(folder_comparison PROPERTIES TIMEOUT 90
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::Core>/../plugins/platforms")
 endif()
