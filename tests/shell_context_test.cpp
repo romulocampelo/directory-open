@@ -13,6 +13,7 @@
 #include <QTimer>
 #include <QTreeView>
 #include <QImage>
+#include <QScopeGuard>
 #include <windows.h>
 #include <shlobj.h>
 
@@ -38,12 +39,18 @@ bool sawPopup = false, sawDynamic = false;
 QString capturePath;
 bool captureSettled = false;
 QString propertiesFixture;
+HWND propertiesOwner = nullptr;
 bool sawProperties = false;
 void CALLBACK closeFixtureProperties(HWND, UINT, UINT_PTR, DWORD) {
     EnumWindows([](HWND window, LPARAM) -> BOOL {
+        DWORD processId = 0; GetWindowThreadProcessId(window, &processId);
+        // Observe/close only a dialog in this process or owned by the fixture.
+        if (processId != GetCurrentProcessId() && GetAncestor(window, GA_ROOTOWNER) != propertiesOwner) return TRUE;
+        if (!IsWindowVisible(window)) return TRUE;
         wchar_t name[256]{}, title[512]{}; GetClassNameW(window, name, 256); GetWindowTextW(window, title, 512);
         if (QString::fromWCharArray(name) == "#32770" && QString::fromWCharArray(title).contains(propertiesFixture)) {
-            sawProperties = true; PostMessageW(window, WM_CLOSE, 0, 0);
+            qInfo().noquote() << "Owned fixture properties dialog:" << QString::fromWCharArray(title);
+            sawProperties = PostMessageW(window, WM_CLOSE, 0, 0) != FALSE;
         }
         return TRUE;
     }, 0);
@@ -154,16 +161,20 @@ private slots:
         QVERIFY(!ShellContextMenu::create(&owner, {}, fixture.path() + "/missing", false, error)); QVERIFY(!error.isEmpty());
     }
     void invokesRealPropertiesForFixtureOnly() {
-        QTemporaryDir fixture; QVERIFY(fixture.isValid()); propertiesFixture = "diropen-properties-" + QFileInfo(fixture.path()).fileName() + ".txt";
+        QTemporaryDir fixture; QVERIFY(fixture.isValid());
+        // Extension visibility is a Shell preference, not part of the command contract.
+        // An extensionless nonce keeps the fixture identity stable in the dialog title.
+        propertiesFixture = "diropen-properties-" + QFileInfo(fixture.path()).fileName();
         const auto path = fixture.path() + '/' + propertiesFixture; write(path);
         QWidget owner; owner.show(); QVERIFY(QTest::qWaitForWindowExposed(&owner));
         QString error; auto shell = ShellContextMenu::create(&owner, {path}, fixture.path(), false, error); QVERIFY2(shell, qPrintable(error));
         const auto command = findVerb(*shell, reinterpret_cast<HMENU>(shell->nativeMenu()), "properties"); QVERIFY(command);
-        const auto hwnd = reinterpret_cast<HWND>(owner.winId()); sawProperties = false; bool released = false;
+        const auto hwnd = reinterpret_cast<HWND>(owner.winId()); propertiesOwner = hwnd; sawProperties = false; bool released = false;
         QVERIFY(SetTimer(hwnd, 7820, 100, closeFixtureProperties));
+        const auto stopObserver = qScopeGuard([hwnd] { KillTimer(hwnd, 7820); propertiesOwner = nullptr; });
         const auto result = shell->dispatch(command, {}, [&] { released = true; });
         QVERIFY2(result.error.isEmpty(), qPrintable(result.error)); QVERIFY(result.invoked); QVERIFY(released); QVERIFY(!result.action);
-        QTRY_VERIFY_WITH_TIMEOUT(sawProperties, 5000); KillTimer(hwnd, 7820); shell.reset();
+        QTRY_VERIFY_WITH_TIMEOUT(sawProperties, 5000); shell.reset();
         QFile file(path); QVERIFY(file.open(QIODevice::ReadOnly)); QCOMPARE(file.readAll(), QByteArray("fixture"));
     }
     void realPopupLazySubmenusAndCancellationReleaseResources() {
