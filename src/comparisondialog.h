@@ -14,6 +14,7 @@ public:
     ~ComparisonDialog() override;
 signals:
     void openFolderRequested(QString path, bool left);
+    void synchronizeRequested(QString left,QString right,QVector<ComparisonEntry> entries);
 protected:
     void reject() override;
 private:
@@ -25,9 +26,13 @@ private:
     QTimer *m_timer;
     ComparisonJob *m_job = nullptr;
     ComparisonReport m_report;
+    ComparisonRequest m_comparedRequest;
+    QPushButton *m_synchronize;
+    bool m_reportStale=true;
     bool m_closeWhenFinished = false, m_cancelRequested = false;
     void startComparison();
     void showReport();
     void filterResults();
     void openFolder(bool left);
+    void updateSynchronization();
 };

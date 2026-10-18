@@ -9,8 +9,9 @@
 
 enum class OperationConflict { Ask, KeepBoth };
 enum class OperationKind { Copy, Move, Rename, CreateFolder, Trash };
-enum class OperationState { Completed, Cancelled, Failed, Incomplete };
-enum class OperationItemState { NotStarted, Completed, Skipped, Cancelled, Failed, Incomplete };
+enum class TransferEngine { Windows, TeraCopy };
+enum class OperationState { Completed, Cancelled, Failed, Incomplete, Delegated };
+enum class OperationItemState { NotStarted, Completed, Skipped, Cancelled, Failed, Incomplete, Delegated };
 struct OperationRequest {
     QStringList sources;
     QString destination;
@@ -19,6 +20,7 @@ struct OperationRequest {
     quintptr ownerWindow = 0;
     OperationKind kind = OperationKind::Copy;
     QString name;
+    TransferEngine engine = TransferEngine::Windows;
 };
 struct OperationItemResult {
     QString source;
@@ -33,11 +35,14 @@ struct OperationResult {
     QVector<OperationItemResult> items;
     QString error;
     int completedCount() const;
+    QString externalRecord; // Dispatch receipt, never proof of transfer completion.
 };
 using OperationProgress = std::function<void(quint32, quint32, const QString &)>;
 QString operationLabel(OperationKind kind);
+QString operationItemLabel(OperationItemState state);
 QString validateItemName(const QString &name);
 QString validateOperationRequest(const OperationRequest &request);
+QString validateOperationTree(const OperationRequest &request, const std::atomic_bool &cancel, const OperationProgress &progress = {});
 OperationResult performOperation(const OperationRequest &request, const std::atomic_bool &cancel, const OperationProgress &progress = {});
 
 class OperationJob final : public QThread {

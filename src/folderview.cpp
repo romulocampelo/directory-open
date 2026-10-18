@@ -23,18 +23,49 @@ QString validateFolderViews(const QVector<FolderViewEntry> &entries) {
         const auto key = folderViewKey(entry.path);
         if (paths.contains(key)) return "Uma pasta tem mais de uma exibição guardada.";
         paths.insert(key);
-        const auto &view = entry.view;
-        if (view.thumbnailSize != 96 && view.thumbnailSize != 144 && view.thumbnailSize != 192 && view.thumbnailSize != 256)
-            return "O tamanho de miniaturas é inválido.";
-        if (view.sortColumn < 0 || view.sortColumn > 3) return "A coluna de ordenação é inválida.";
-        QSet<int> columns;
-        for (int i = 0; i < 3; ++i) {
-            if (view.order[i] < 1 || view.order[i] > 3 || columns.contains(view.order[i])) return "A ordem das colunas é inválida.";
-            columns.insert(view.order[i]);
-            if (view.widths[i] < 32 || view.widths[i] > 8192) return "A largura de uma coluna deve estar entre 32 e 8192 pixels.";
-        }
+        const auto error=validateFolderView(entry.view);if(!error.isEmpty())return error;
     }
     return {};
+}
+QString validateFolderView(const FolderView &view){
+    if (view.thumbnailSize != 96 && view.thumbnailSize != 144 && view.thumbnailSize != 192 && view.thumbnailSize != 256)
+    return "O tamanho de miniaturas é inválido.";
+    if (view.sortColumn < 0 || view.sortColumn > 3) return "A coluna de ordenação é inválida.";
+    if(view.grouping<0||view.grouping>3||(view.thumbnails&&view.grouping))return "Agrupamento inválido para esta exibição.";
+    QSet<int> columns;
+    for (int i = 0; i < 3; ++i) {
+    if (view.order[i] < 1 || view.order[i] > 3 || columns.contains(view.order[i])) return "A ordem das colunas é inválida.";
+    columns.insert(view.order[i]);
+    if (view.widths[i] < 32 || view.widths[i] > 8192) return "A largura de uma coluna deve estar entre 32 e 8192 pixels.";
+    }
+    return {};
+}
+std::optional<FolderView> decodeFolderView(const QJsonValue &value){
+    if(!value.isObject())return {};const auto object=value.toObject();
+    if (!integer(object["sortColumn"], 0, 3)
+    || !object["descending"].isBool()) return {};
+    FolderView view; view.sortColumn = object["sortColumn"].toInt(); view.descending = object["descending"].toBool();
+    if(object.contains("grouping")){if(!integer(object["grouping"],0,3))return {};view.grouping=object["grouping"].toInt();}
+    if (object.contains("thumbnails")) {
+    if (!object["thumbnails"].isBool()) return {};
+    view.thumbnails = object["thumbnails"].toBool();
+    }
+    if (object.contains("thumbnailSize")) {
+    if (!integer(object["thumbnailSize"], 96, 256)) return {};
+    view.thumbnailSize = object["thumbnailSize"].toInt();
+    }
+    for (const auto &key : {"order", "widths", "visible"})
+    if (!object[key].isArray() || object[key].toArray().size() != 3) return {};
+    const auto order = object["order"].toArray(), widths = object["widths"].toArray(), visible = object["visible"].toArray();
+    for (int i = 0; i < 3; ++i) {
+    if (!integer(order[i], 1, 3) || !integer(widths[i], 32, 8192) || !visible[i].isBool()) return {};
+    view.order[i] = order[i].toInt(); view.widths[i] = widths[i].toInt(); view.visible[i] = visible[i].toBool();
+    }
+    if(!validateFolderView(view).isEmpty())return {};return view;
+}
+QJsonObject encodeFolderView(const FolderView &v){
+    QJsonArray order,widths,visible;for(int i=0;i<3;++i){order.append(v.order[i]);widths.append(v.widths[i]);visible.append(v.visible[i]);}
+    return {{"sortColumn",v.sortColumn},{"descending",v.descending},{"order",order},{"widths",widths},{"visible",visible},{"thumbnails",v.thumbnails},{"thumbnailSize",v.thumbnailSize},{"grouping",v.grouping}};
 }
 std::optional<QVector<FolderViewEntry>> decodeFolderViews(const QJsonValue &value) {
     if (!value.isArray()) return std::nullopt;
@@ -44,25 +75,8 @@ std::optional<QVector<FolderViewEntry>> decodeFolderViews(const QJsonValue &valu
     for (const auto &item : array) {
         if (!item.isObject()) return std::nullopt;
         const auto object = item.toObject();
-        if (!object["path"].isString() || !integer(object["sortColumn"], 0, 3)
-            || !object["descending"].isBool()) return std::nullopt;
-        FolderView view; view.sortColumn = object["sortColumn"].toInt(); view.descending = object["descending"].toBool();
-        if (object.contains("thumbnails")) {
-            if (!object["thumbnails"].isBool()) return std::nullopt;
-            view.thumbnails = object["thumbnails"].toBool();
-        }
-        if (object.contains("thumbnailSize")) {
-            if (!integer(object["thumbnailSize"], 96, 256)) return std::nullopt;
-            view.thumbnailSize = object["thumbnailSize"].toInt();
-        }
-        for (const auto &key : {"order", "widths", "visible"})
-            if (!object[key].isArray() || object[key].toArray().size() != 3) return std::nullopt;
-        const auto order = object["order"].toArray(), widths = object["widths"].toArray(), visible = object["visible"].toArray();
-        for (int i = 0; i < 3; ++i) {
-            if (!integer(order[i], 1, 3) || !integer(widths[i], 32, 8192) || !visible[i].isBool()) return std::nullopt;
-            view.order[i] = order[i].toInt(); view.widths[i] = widths[i].toInt(); view.visible[i] = visible[i].toBool();
-        }
-        entries.append({object["path"].toString(), view});
+        if(!object["path"].isString())return {};const auto view=decodeFolderView(object);if(!view)return {};
+        entries.append({object["path"].toString(), *view});
     }
     if (!validateFolderViews(entries).isEmpty()) return std::nullopt;
     return entries;
@@ -70,10 +84,7 @@ std::optional<QVector<FolderViewEntry>> decodeFolderViews(const QJsonValue &valu
 QJsonArray encodeFolderViews(const QVector<FolderViewEntry> &entries) {
     QJsonArray array;
     for (const auto &entry : entries) {
-        QJsonArray order, widths, visible;
-        for (int i = 0; i < 3; ++i) { order.append(entry.view.order[i]); widths.append(entry.view.widths[i]); visible.append(entry.view.visible[i]); }
-        array.append(QJsonObject{{"path", entry.path}, {"sortColumn", entry.view.sortColumn}, {"descending", entry.view.descending},
-            {"order", order}, {"widths", widths}, {"visible", visible}, {"thumbnails", entry.view.thumbnails}, {"thumbnailSize", entry.view.thumbnailSize}});
+        auto value=encodeFolderView(entry.view);value["path"]=entry.path;array.append(value);
     }
     return array;
 }

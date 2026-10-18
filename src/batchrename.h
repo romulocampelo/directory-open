@@ -1,5 +1,6 @@
 #pragma once
 #include "fileoperation.h"
+#include "renamerecipe.h"
 #include <QDateTime>
 #include <atomic>
 
@@ -11,6 +12,7 @@ struct BatchRenameOptions {
     RenameDateSource dateSource = RenameDateSource::Modified;
     QDate fixedDate = QDate::currentDate();
     QString dateFormat = "yyyy-MM-dd";
+    RenameRecipe recipe;
 };
 struct BatchRenameItem {
     QString source, target, name, error;

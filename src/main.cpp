@@ -12,6 +12,8 @@
 #include <QTimer>
 #include <QWindow>
 #include "filepanel.h"
+#include "uilanguage.h"
+#include <QStatusBar>
 
 int main(int argc, char **argv) {
     QApplication app(argc, argv);
@@ -28,7 +30,10 @@ int main(int argc, char **argv) {
     parser.process(app);
     const auto sessionPath = parser.isSet("no-session") || (parser.isSet("capture") && !parser.isSet("session-file")) ? QString{}
         : parser.isSet("session-file") ? QFileInfo(parser.value("session-file")).absoluteFilePath() : SessionStore::defaultPath();
+    UiLanguage language;QString languageError;
+    if(!sessionPath.isEmpty()){SessionStore startup(sessionPath);const auto saved=startup.load();if(saved.state==SessionLoadState::Loaded||saved.state==SessionLoadState::Recovered)languageError=language.load(saved.session.ui.advanced.languageFile);}
     MainWindow window(parser.value("left"), parser.value("right"), true, sessionPath); window.show();
+    if(!languageError.isEmpty())QTimer::singleShot(0,&window,[&window,languageError]{window.statusBar()->showMessage(languageError);});
     if (parser.isSet("dark")) window.findChild<QAction *>("darkTheme")->setChecked(true);
     if (parser.isSet("capture")) {
         QTimer::singleShot(3500, &window, [&] {

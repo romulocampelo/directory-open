@@ -1,80 +1,115 @@
-#include <windows.h>
-#include <winrt/Windows.Foundation.h>
-#include <winrt/Windows.Storage.Streams.h>
-#include <winrt/Windows.Data.Pdf.h>
 #include "pdfrenderer.h"
 #include <QBuffer>
 #include <QCryptographicHash>
-#include <QImageReader>
+#include <QPdfDocument>
+#include <QPdfSearchModel>
 #include <cmath>
-#include <limits>
-using namespace winrt::Windows::Storage::Streams;
-using namespace winrt::Windows::Data::Pdf;
-struct PdfRenderer::Impl {
-    bool runtimeReady = false;
-    PdfDocument document{nullptr};
-    InMemoryRandomAccessStream stream{nullptr};
-    QByteArray digest;
-    void clear() { document = nullptr; stream = nullptr; digest.clear(); }
-};
 
+namespace {
+constexpr int maxPageCharacters = 65536;
+constexpr int maxSearchPages = 128;
+constexpr int maxDocumentPages = 10000;
+constexpr int maxBounds = 4096;
+}
+struct PdfRenderer::Impl {
+    // QPdfDocument and its QIODevice never cross their worker's boundary.
+    QByteArray bytes, digest;
+    QBuffer input;
+    std::unique_ptr<QPdfDocument> document;
+    void clear() { document.reset(); input.close(); input.setData({}); bytes.clear(); digest.clear(); }
+};
 PdfRenderer::PdfRenderer() : m_impl(std::make_unique<Impl>()) {}
-PdfRenderer::~PdfRenderer() { m_impl->clear(); if (m_impl->runtimeReady) winrt::uninit_apartment(); }
+PdfRenderer::~PdfRenderer() = default;
 void PdfRenderer::clear() { m_impl->clear(); }
-PdfRenderResult PdfRenderer::render(const QByteArray &bytes, int pageNumber, QSize maximum, const std::function<bool()> &stale) {
+PdfRenderResult PdfRenderer::render(const QByteArray &bytes, int page, QSize maximum, const std::function<bool()> &stale) {
     PdfRenderResult result;
-    auto fail = [&](const QString &message) { result.message = message; return result; };
-    constexpr qint64 maxFileBytes = 64 * 1024 * 1024;
-    constexpr qint64 maxBitmapPixels = 4096 * 4096;
-    if (bytes.size() > maxFileBytes || !maximum.isValid() || maximum.width() > 4096 || maximum.height() > 4096)
-        return fail("O PDF excede o orçamento do renderizador.");
-    struct DpiScope {
-        DPI_AWARENESS_CONTEXT previous = SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-        ~DpiScope() { if (previous) SetThreadDpiAwarenessContext(previous); }
-    } dpi;
-    auto &pdf = *m_impl; auto &runtimeReady = pdf.runtimeReady;
-    if (!runtimeReady) {
-        try { winrt::init_apartment(winrt::apartment_type::multi_threaded); runtimeReady = true; }
-        catch (const winrt::hresult_error &) { return fail("O renderizador de PDF do Windows não está disponível."); }
+    if (bytes.isEmpty() || bytes.size() > 64 * 1024 * 1024) { clear(); result.message = "O PDF excede o limite de 64 MiB ou está vazio."; return result; }
+    if (stale()) return result;
+    const auto digest = QCryptographicHash::hash(bytes,QCryptographicHash::Sha256);
+    auto &pdf = *m_impl;
+    if (pdf.digest != digest) {
+        pdf.clear(); pdf.bytes = bytes; pdf.input.setData(pdf.bytes); pdf.input.open(QIODevice::ReadOnly);
+        pdf.document = std::make_unique<QPdfDocument>(); pdf.document->load(&pdf.input);
+        if (pdf.document->status() != QPdfDocument::Status::Ready || pdf.document->pageCount() < 1) {
+            pdf.clear(); result.message = "Não foi possível visualizar o PDF (arquivo inválido, protegido ou indisponível)."; return result;
+        }
+        if (pdf.document->pageCount() > maxDocumentPages) { pdf.clear(); result.message = "O PDF excede o limite de 10.000 páginas."; return result; }
+        pdf.digest = digest;
     }
-    try {
-        const auto digest = QCryptographicHash::hash(bytes, QCryptographicHash::Sha256);
-        if (!pdf.document || digest != pdf.digest) {
-            pdf.clear(); pdf.stream = InMemoryRandomAccessStream();
-            DataWriter writer(pdf.stream);
-            writer.WriteBytes(winrt::array_view<const uint8_t>(reinterpret_cast<const uint8_t *>(bytes.constData()), reinterpret_cast<const uint8_t *>(bytes.constData()) + bytes.size()));
-            writer.StoreAsync().get(); writer.DetachStream(); pdf.stream.Seek(0);
-            if (stale()) { pdf.clear(); return result; }
-            pdf.document = PdfDocument::LoadFromStreamAsync(pdf.stream).get(); pdf.digest = digest;
+    return renderPage(page,maximum,stale);
+}
+PdfRenderResult PdfRenderer::renderPage(int page, QSize maximum, const std::function<bool()> &stale) {
+    PdfRenderResult result;
+    auto &pdf = *m_impl;
+    if (!pdf.document || page < 0 || page >= pdf.document->pageCount()) { result.message = "Página de PDF fora do documento."; return result; }
+    if (!maximum.isValid() || maximum.width() > 4096 || maximum.height() > 4096) { result.message = "O PDF excede o orçamento do renderizador."; return result; }
+    if (stale()) return result;
+    const auto size = pdf.document->pagePointSize(page);
+    if (!std::isfinite(size.width()) || !std::isfinite(size.height()) || size.width() <= 0 || size.height() <= 0 || size.width() > 100000 || size.height() > 100000) {
+        result.message = "Dimensões da página de PDF inválidas ou excessivas."; return result;
+    }
+    // 100% remains 96 dpi; backend geometry is kept separately in PDF points.
+    result.originalSize = QSize(int(std::ceil(size.width()*96/72)),int(std::ceil(size.height()*96/72)));
+    const auto bitmapSize = result.originalSize.scaled(maximum,Qt::KeepAspectRatio);
+    result.image = pdf.document->render(page,bitmapSize);
+    if (stale()) return {};
+    if (result.image.isNull()) { result.message = "O renderizador não retornou uma página de PDF válida."; return result; }
+    result.pages = pdf.document->pageCount(); result.page = page; result.digest = pdf.digest; result.pointSize = size;
+    return result;
+}
+PdfTextResult PdfRenderer::interact(const PdfTextRequest &request, const std::function<bool()> &stale) {
+    PdfTextResult result;
+    auto fail = [&](const QString &message) { result.complete = false; result.message = message; return result; };
+    auto &pdf = *m_impl;
+    if (!pdf.document || request.digest.isEmpty() || request.digest != pdf.digest || request.page < 0 || request.page >= pdf.document->pageCount())
+        return fail("A prévia do PDF mudou. Use Atualizar antes de pesquisar ou selecionar.");
+    if (stale()) return result;
+    if (request.action == PdfTextAction::Find) {
+        if (request.query.isEmpty() || request.query.size() > 256) return fail("Informe entre 1 e 256 caracteres para pesquisar.");
+        if (request.matchIndex < -1 || request.matchIndex > maxPageCharacters) return fail("Posição de busca do PDF inválida.");
+        result.complete = true;
+        const int pages = pdf.document->pageCount(), direction = request.backwards ? -1 : 1;
+        // Each model lives for ONE examined page. Its timers never run in this
+        // worker loop, so it cannot index other pages or accumulate the document.
+        for (int offset = 0; offset <= pages && offset < maxSearchPages; ++offset) {
+            if (stale()) return {};
+            const int page = (request.page + direction*offset%pages + pages)%pages;
+            ++result.examinedPages;
+            const auto sample = pdf.document->getSelectionAtIndex(page,0,maxPageCharacters+1);
+            if (sample.text().size() > maxPageCharacters) { result.complete = false; continue; }
+            QPdfSearchModel search;
+            search.setDocument(pdf.document.get()); search.setSearchString(request.query);
+            const auto matches = search.resultsOnPage(page);
+            const int index = offset == 0 && request.matchIndex >= 0 ? request.matchIndex + direction
+                : request.backwards ? int(matches.size())-1 : 0;
+            if (index < 0 || index >= matches.size()) continue;
+            const auto bounds = matches[index].rectangles();
+            if (bounds.size() > maxBounds) { result.complete = false; continue; }
+            result.found = true; result.page = page; result.matchIndex = index; result.bounds = bounds;
+            result.message = QString("Ocorrência %1 na página %2%3").arg(index+1).arg(page+1).arg(result.complete ? QString{} : " — busca parcial");
+            return result;
         }
-        const auto pages = pdf.document.PageCount();
-        if (pages == 0 || pages > uint32_t(std::numeric_limits<int>::max())) return fail("O PDF não contém uma contagem de páginas utilizável.");
-        if (pageNumber < 0 || uint32_t(pageNumber) >= pages) return fail("Página de PDF fora do documento.");
-        if (stale()) return result;
-        auto page = pdf.document.GetPage(uint32_t(pageNumber)); const auto size = page.Size();
-        if (!std::isfinite(size.Width) || !std::isfinite(size.Height) || size.Width <= 0 || size.Height <= 0 || size.Width > 100000 || size.Height > 100000) {
-            page.Close(); return fail("Dimensões da página de PDF inválidas ou excessivas.");
-        }
-        const auto renderSize = QSize(qMax(1, int(std::ceil(size.Width))), qMax(1, int(std::ceil(size.Height)))).scaled(maximum, Qt::KeepAspectRatio);
-        // Destination sizes are DIPs. Normalize at this owning boundary, before
-        // native allocation, so system scaling cannot inflate the bitmap.
-        const double dpiScale = qMax(1.0, double(GetDpiForSystem()) / 96.0);
-        PdfPageRenderOptions options; options.DestinationWidth(uint32_t(qMax(1, int(std::floor(renderSize.width() / dpiScale))))); options.DestinationHeight(uint32_t(qMax(1, int(std::floor(renderSize.height() / dpiScale)))));
-        InMemoryRandomAccessStream rendered; page.RenderToStreamAsync(rendered, options).get(); page.Close();
-        if (rendered.Size() > uint64_t(maxFileBytes)) return fail("A página renderizada excede o limite de memória.");
-        DataReader reader(rendered.GetInputStreamAt(0)); const auto length = uint32_t(rendered.Size()); reader.LoadAsync(length).get();
-        QByteArray png(length, Qt::Uninitialized);
-        reader.ReadBytes(winrt::array_view<uint8_t>(reinterpret_cast<uint8_t *>(png.data()), reinterpret_cast<uint8_t *>(png.data()) + png.size()));
-        QBuffer renderedInput; renderedInput.setData(png); renderedInput.open(QIODevice::ReadOnly);
-        QImageReader renderedReader(&renderedInput, "PNG");
-        const auto bitmapSize = renderedReader.size();
-        if (!bitmapSize.isValid() || qint64(bitmapSize.width()) * bitmapSize.height() > maxBitmapPixels) return fail("A página renderizada excede o limite de resolução do visualizador.");
-        result.image = renderedReader.read();
-        if (result.image.isNull()) return fail("O Windows não retornou uma página de PDF válida.");
-        result.pages = int(pages); result.page = pageNumber;
-        result.originalSize = QSize(qMax(1, int(std::ceil(size.Width))), qMax(1, int(std::ceil(size.Height))));
+        if (pages+1 > maxSearchPages) result.complete = false;
+        result.message = result.complete ? "Texto não encontrado no PDF. Páginas sem texto pesquisável não usam OCR."
+            : QString("Busca parcial: %1 páginas examinadas; limite de 128 páginas por busca ou 65.536 caracteres por página. Vá a outra página para continuar; não foi possível concluir a ausência.").arg(result.examinedPages);
         return result;
-    } catch (const winrt::hresult_error &error) {
-        pdf.clear(); return fail("Não foi possível visualizar o PDF (arquivo inválido, protegido ou indisponível). " + QString::fromStdWString(std::wstring(error.message())));
     }
+    result.page = request.page;
+    result.complete = true;
+    const auto sample = pdf.document->getSelectionAtIndex(request.page,0,maxPageCharacters+1);
+    if (sample.text().size() > maxPageCharacters) return fail("A página excede o limite de 65.536 caracteres para seleção e pesquisa.");
+    auto selection = sample;
+    if (request.action == PdfTextAction::Select) {
+        const auto size = pdf.document->pagePointSize(request.page);
+        auto inside = [&size](QPointF p) { return std::isfinite(p.x()) && std::isfinite(p.y()) && p.x() >= 0 && p.y() >= 0 && p.x() <= size.width() && p.y() <= size.height(); };
+        if (!inside(request.start) || !inside(request.end)) return fail("Seleção fora da página de PDF.");
+        selection = pdf.document->getSelection(request.page,request.start,request.end);
+    } else if (request.action != PdfTextAction::SelectAll) return fail("Ação de texto do PDF inválida.");
+    if (stale()) return {};
+    if (selection.text().size() > maxPageCharacters || selection.bounds().size() > maxBounds) return fail("A seleção excede o orçamento de texto/geometria do visualizador.");
+    result.text = selection.text();
+    for (const auto &polygon : selection.bounds()) result.bounds.append(polygon.boundingRect());
+    result.found = !result.text.isEmpty();
+    result.message = result.found ? QString("%1 caracteres selecionados — Ctrl+C para copiar").arg(result.text.size()) : "Sem texto selecionável nesse trecho. Não é feita leitura OCR.";
+    return result;
 }

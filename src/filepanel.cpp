@@ -1,7 +1,12 @@
 #include "filepanel.h"
+#include "interfacecommands.h"
 #include <algorithm>
 #include "filelistview.h"
 #include "folderviewsdialog.h"
+#include "folderpresentation.h"
+#include <QSplitter>
+#include <QMouseEvent>
+#include <QDialog>
 #include "thumbnailcache.h"
 #include "thumbnailview.h"
 #include <QStackedWidget>
@@ -30,6 +35,16 @@
 #include <QTreeView>
 #include <QVBoxLayout>
 
+namespace {
+QModelIndex fileIndexAt(QAbstractItemView *view, const QPoint &point) {
+    const auto index = view->indexAt(point);
+    if (qobject_cast<QTreeView *>(view) && index.isValid() &&
+        !index.data(GroupHeaderRole).toString().isEmpty() &&
+        point.y() < view->visualRect(index).top() + GroupedFileDelegate::headerHeight(view->fontMetrics())) return {};
+    return index;
+}
+}
+
 class ReadOnlyFileModel final : public QFileSystemModel {
 public:
     explicit ReadOnlyFileModel(QObject *parent) : QFileSystemModel(parent) {}
@@ -52,37 +67,6 @@ public:
     }
 private:
     QSet<QString> m_cut;
-};
-
-class FolderFilter final : public QSortFilterProxyModel {
-public:
-    explicit FolderFilter(QObject *parent) : QSortFilterProxyModel(parent) {
-        setSortCaseSensitivity(Qt::CaseInsensitive);
-    }
-    QString root;
-    QString text;
-    void update(const QString &path, const QString &query) {
-#if QT_VERSION >= QT_VERSION_CHECK(6, 10, 0)
-        beginFilterChange(); root = path; text = query; endFilterChange(Direction::Rows);
-#else
-        root = path; text = query; invalidateFilter();
-#endif
-    }
-protected:
-    bool filterAcceptsRow(int row, const QModelIndex &parent) const override {
-        const auto *model = qobject_cast<QFileSystemModel *>(sourceModel());
-        if (model->filePath(parent) != root || text.isEmpty()) return true;
-        return model->fileName(model->index(row, 0, parent)).contains(text, Qt::CaseInsensitive);
-    }
-    bool lessThan(const QModelIndex &a, const QModelIndex &b) const override {
-        const auto *model = qobject_cast<QFileSystemModel *>(sourceModel());
-        const auto left = model->fileInfo(a), right = model->fileInfo(b);
-        if (left.isDir() != right.isDir()) return left.isDir();
-        if (a.column() == 1) return left.size() < right.size();
-        if (a.column() == 3) return left.lastModified() < right.lastModified();
-        if (a.column() == 2) return QString::localeAwareCompare(model->type(a), model->type(b)) < 0;
-        return QString::localeAwareCompare(left.fileName().toCaseFolded(), right.fileName().toCaseFolded()) < 0;
-    }
 };
 
 FilePanel::FilePanel(QWidget *parent, FolderViewCatalog *folderViews, ThumbnailCache *thumbnails) : QWidget(parent),
@@ -112,7 +96,7 @@ FilePanel::FilePanel(QWidget *parent, FolderViewCatalog *folderViews, ThumbnailC
     auto configureTransfers = [this](auto *view) {
         view->selectedFiles = [this] { return selectedPaths(); };
         view->destinationAt = [this, view](const QPoint &point) {
-            const auto index = m_filter->mapToSource(view->indexAt(point));
+            const auto index = m_filter->mapToSource(fileIndexAt(view,point));
             return index.isValid() && m_model->isDir(index) ? m_model->filePath(index) : path();
         };
         view->receiveFiles = [this](FileTransfer transfer, const QString &destination) { emit activated(); emit transferRequested(transfer, destination); };
@@ -120,7 +104,8 @@ FilePanel::FilePanel(QWidget *parent, FolderViewCatalog *folderViews, ThumbnailC
     configureTransfers(transferView); configureTransfers(m_iconView);
     m_view->setModel(m_filter); m_view->setRootIsDecorated(false); m_view->setItemsExpandable(false);
     m_view->setSortingEnabled(true); m_view->sortByColumn(0, Qt::AscendingOrder);
-    m_view->setUniformRowHeights(true); m_view->setAllColumnsShowFocus(true);
+    m_view->setUniformRowHeights(false);
+    m_view->setItemDelegate(new GroupedFileDelegate(m_view)); m_view->setAllColumnsShowFocus(true);
     m_view->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_view->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_view->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -148,6 +133,8 @@ FilePanel::FilePanel(QWidget *parent, FolderViewCatalog *folderViews, ThumbnailC
     m_iconView->setUniformItemSizes(true); m_iconView->setSpacing(0);
     m_iconView->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
     m_iconView->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    // Both presentations share a multi-column model and consume selected rows.
+    m_iconView->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_iconView->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_iconView->setContextMenuPolicy(Qt::CustomContextMenu);
     m_iconView->installEventFilter(this); m_iconView->viewport()->installEventFilter(this);
@@ -155,9 +142,11 @@ FilePanel::FilePanel(QWidget *parent, FolderViewCatalog *folderViews, ThumbnailC
     m_thumbnailView = new ThumbnailView(m_iconView, m_model, m_filter, m_thumbnails);
     m_views = new QStackedWidget(this); m_views->addWidget(m_view); m_views->addWidget(m_iconView);
     auto doubleClick = [this](const QModelIndex &index) {
-        const auto info = m_model->fileInfo(m_filter->mapToSource(index));
+        const auto source = m_filter->mapToSource(index);
+        if (!source.isValid()) return;
+        const auto info = m_model->fileInfo(source);
         if (info.isDir()) navigate(info.absoluteFilePath());
-        else emit selected(info.absoluteFilePath());
+        else emit openRequested(info.absoluteFilePath());
     };
     connect(m_iconView, &QListView::doubleClicked, this, doubleClick);
     connect(m_view, &QTreeView::doubleClicked, this, doubleClick);
@@ -165,12 +154,21 @@ FilePanel::FilePanel(QWidget *parent, FolderViewCatalog *folderViews, ThumbnailC
         updateSummary(); emit selected(selectedPath());
     });
     connect(m_view->selectionModel(), &QItemSelectionModel::currentChanged, this, [this] { emit selected(selectedPath()); });
-    layout->addWidget(m_views, 1);
+    m_content=new QSplitter(this);m_content->setObjectName("panelContent");m_content->addWidget(m_views);m_content->setCollapsible(0,false);layout->addWidget(m_content,1);
     auto *tabRow = new QWidget(this); auto *tabsLayout = new QHBoxLayout(tabRow);
     tabsLayout->setContentsMargins(0, 0, 2, 0); tabsLayout->setSpacing(0);
     m_tabBar = new QTabBar(this); m_tabBar->setObjectName("folderTabs");
     m_tabBar->setExpanding(false); m_tabBar->setElideMode(Qt::ElideMiddle);
     m_tabBar->setShape(QTabBar::RoundedSouth);
+    m_tabBar->setMovable(true);m_tabBar->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_tabBar,&QTabBar::tabMoved,this,[this](int from,int to){m_tabs.move(from,to);applyPath();});
+    connect(m_tabBar,&QTabBar::customContextMenuRequested,this,[this](const QPoint &point){
+        const int index=m_tabBar->tabAt(point);if(index<0)return;m_tabBar->setCurrentIndex(index);emit activated();QMenu menu(this);menu.setObjectName("tabContextMenu");
+        auto *duplicate=menu.addAction(tr("Duplicar aba"),this,&FilePanel::duplicateTab);
+        auto *lock=menu.addAction(tr("Bloquear pasta da aba"));lock->setCheckable(true);lock->setChecked(tabLocked());connect(lock,&QAction::triggered,this,&FilePanel::setTabLocked);
+        auto *close=menu.addAction(tr("Fechar aba"),this,[this,index]{closeTab(index);});close->setEnabled(!tabLocked()&&m_tabs.size()>1);
+        if(m_tabMenu)arrangeContextMenu(menu,*m_tabMenu,{{"tabDuplicate",duplicate},{"tabLock",lock},{"tabClose",close}});menu.exec(m_tabBar->mapToGlobal(point));
+    });
     connect(m_tabBar, &QTabBar::currentChanged, this, [this](int index) { if (index >= 0 && index < m_tabs.size()) applyPath(); });
     connect(m_tabBar, &QTabBar::tabCloseRequested, this, &FilePanel::closeTab);
     auto *add = new QToolButton(this); add->setText("+"); add->setToolTip(tr("Nova aba (Ctrl+T)"));
@@ -199,7 +197,7 @@ FilePanel::FilePanel(QWidget *parent, FolderViewCatalog *folderViews, ThumbnailC
 FolderView FilePanel::currentView() const {
     FolderView view; view.thumbnails = m_thumbnailMode; view.thumbnailSize = m_thumbnailSize; const auto *header = m_view->header();
     view.sortColumn = header->sortIndicatorSection(); view.descending = header->sortIndicatorOrder() == Qt::DescendingOrder;
-    view.widths = m_columnWidths;
+    view.widths = m_columnWidths; view.grouping=m_filter->grouping();
     for (int i = 0; i < 3; ++i) {
         view.order[i] = header->logicalIndex(i + 1);
         view.visible[i] = !m_view->isColumnHidden(i + 1);
@@ -210,6 +208,7 @@ QAbstractItemView *FilePanel::filesView() const { return m_thumbnailMode ? stati
 void FilePanel::addFileAction(QAction *action) { m_view->addAction(action); m_iconView->addAction(action); }
 void FilePanel::setThumbnailPresentation(bool on, int size) {
     const bool focused = filesView()->hasFocus();
+    if(on)m_filter->setGrouping(0);
     m_thumbnailMode = on; m_thumbnailSize = size; m_thumbnailView->setSize(size);
     m_views->setCurrentWidget(on ? static_cast<QWidget *>(m_iconView) : m_view);
     if (focused) filesView()->setFocus();
@@ -224,6 +223,7 @@ void FilePanel::applyView(const FolderView &view) {
     }
     setThumbnailPresentation(view.thumbnails, view.thumbnailSize);
     m_columnWidths = view.widths;
+    m_filter->setGrouping(view.grouping);
     m_view->sortByColumn(view.sortColumn, view.descending ? Qt::DescendingOrder : Qt::AscendingOrder);
 }
 void FilePanel::applyFolderView() {
@@ -272,6 +272,10 @@ void FilePanel::createViewMenu(QToolBar *nav) {
     }
     sortMenu->addSeparator(); auto *descending = sortMenu->addAction(tr("Ordem decrescente")); descending->setObjectName("viewDescending"); descending->setCheckable(true);
     connect(descending, &QAction::triggered, this, [this](bool on) { m_view->sortByColumn(m_view->header()->sortIndicatorSection(), on ? Qt::DescendingOrder : Qt::AscendingOrder); });
+    auto *groups=menu->addMenu(tr("Agrupar por"));
+    const QStringList groupNames{tr("Sem agrupamento"),tr("Tipo / extensão"),tr("Mês de modificação"),tr("Faixa de tamanho")};
+    for(int i=0;i<groupNames.size();++i){auto *a=groups->addAction(groupNames[i]);a->setObjectName(QString("groupBy%1").arg(i));a->setCheckable(true);connect(a,&QAction::triggered,this,[this,i]{setGrouping(i);});connect(menu,&QMenu::aboutToShow,a,[this,a,i]{a->setChecked(m_filter->grouping()==i);});}
+    auto *rules=menu->addAction(tr("Filtro combinado da aba…"),this,&FilePanel::editRules);rules->setObjectName("advancedFolderFilter");
     auto *reset = menu->addAction(tr("Restaurar exibição padrão")); reset->setObjectName("viewReset");
     connect(reset, &QAction::triggered, this, [this] { applyView(FolderView{}); });
     menu->addSeparator();
@@ -337,6 +341,7 @@ bool FilePanel::navigate(const QString &requested) {
     }
     const QString resolved = info.canonicalFilePath();
     if (resolved.isEmpty()) return false;
+    if(tabLocked()&&resolved!=path()){const auto count=m_tabs.size();newTab(resolved);return m_tabs.size()>count;}
     auto &tab = m_tabs[m_tabBar->currentIndex()];
     tab.unavailablePath.clear();
     if (resolved != path()) {
@@ -349,6 +354,7 @@ void FilePanel::newTab(const QString &requested) {
     const QString start = requested.isEmpty() ? path() : requested;
     const QFileInfo info(start);
     if (!info.exists() || !info.isDir() || info.canonicalFilePath().isEmpty()) return;
+    if(m_tabs.size()>=256)return;
     m_tabs.append(Tab{{info.canonicalFilePath()}, 0, {}, {}});
     const QSignalBlocker blocker(m_tabBar);
     const int index = m_tabBar->addTab(info.fileName().isEmpty() ? QDir::toNativeSeparators(info.canonicalFilePath()) : info.fileName());
@@ -356,7 +362,7 @@ void FilePanel::newTab(const QString &requested) {
     applyPath();
 }
 void FilePanel::closeTab(int index) {
-    if (m_tabs.size() <= 1 || index < 0 || index >= m_tabs.size()) return;
+    if (m_tabs.size() <= 1 || index < 0 || index >= m_tabs.size() || m_tabs[index].locked) return;
     const QSignalBlocker blocker(m_tabBar);
     m_tabs.removeAt(index); m_tabBar->removeTab(index); m_tabBar->setTabsClosable(m_tabs.size() > 1);
     applyPath();
@@ -372,19 +378,20 @@ void FilePanel::applyPath() {
     }
     m_address->setText(QDir::toNativeSeparators(current));
     const QSignalBlocker blocker(m_search); m_search->setText(tab.filter);
-    m_filter->update(current, tab.filter);
+    m_filter->update(current, tab.filter,tab.rules);
     const auto root = m_model->setRootPath(current);
     m_view->setRootIndex(m_filter->mapFromSource(root)); m_iconView->setRootIndex(m_view->rootIndex()); m_view->clearSelection();
     m_thumbnailView->requestVisible();
     applyFolderView();
     const auto name = QFileInfo(current).fileName();
-    m_tabBar->setTabText(m_tabBar->currentIndex(), name.isEmpty() ? QDir::toNativeSeparators(current) : name);
+    m_tabBar->setTabText(m_tabBar->currentIndex(), (tab.locked?QStringLiteral("🔒 "):QString{})+(name.isEmpty() ? QDir::toNativeSeparators(current) : name));
     m_tabBar->setTabToolTip(m_tabBar->currentIndex(), QDir::toNativeSeparators(current));
-    m_back->setEnabled(tab.position > 0); m_forward->setEnabled(tab.position + 1 < tab.history.size());
+    m_back->setEnabled(!tab.locked&&tab.position>0);m_forward->setEnabled(!tab.locked&&tab.position+1<tab.history.size());
+    if(m_tree){const auto index=m_treeModel->index(current);if(index.isValid()){m_tree->setCurrentIndex(index);m_tree->scrollTo(index);}}
     updateSummary(); emit pathChanged(current); emit selected({});
 }
-void FilePanel::back() { auto &tab = m_tabs[m_tabBar->currentIndex()]; if (tab.position > 0) { --tab.position; applyPath(); } }
-void FilePanel::forward() { auto &tab = m_tabs[m_tabBar->currentIndex()]; if (tab.position + 1 < tab.history.size()) { ++tab.position; applyPath(); } }
+void FilePanel::back() { auto &tab = m_tabs[m_tabBar->currentIndex()]; if (!tab.locked && tab.position > 0) { --tab.position; applyPath(); } }
+void FilePanel::forward() { auto &tab = m_tabs[m_tabBar->currentIndex()]; if (!tab.locked && tab.position + 1 < tab.history.size()) { ++tab.position; applyPath(); } }
 void FilePanel::up() { QDir folder(path()); if (folder.cdUp()) navigate(folder.absolutePath()); }
 void FilePanel::focusAddress() { m_address->setFocus(); m_address->selectAll(); }
 void FilePanel::focusFilter() { m_search->setFocus(); m_search->selectAll(); }
@@ -408,7 +415,7 @@ void FilePanel::setFilter(const QString &text) {
     if (m_tabBar->currentIndex() < 0) return;
     m_tabs[m_tabBar->currentIndex()].filter = text;
     { const QSignalBlocker blocker(m_search); m_search->setText(text); }
-    m_filter->update(path(), text);
+    m_filter->update(path(), text,rules());
     m_view->setRootIndex(m_filter->mapFromSource(m_model->index(path())));
     m_iconView->setRootIndex(m_view->rootIndex()); m_thumbnailView->requestVisible();
     updateSummary();
@@ -441,10 +448,10 @@ void FilePanel::updateSummary() {
 }
 PanelSession FilePanel::session() const {
     PanelSession state;
-    for (const auto &tab : m_tabs) state.tabs.append({tab.unavailablePath.isEmpty() ? tab.history.value(tab.position) : tab.unavailablePath, tab.filter});
+    for (const auto &tab : m_tabs) state.tabs.append({tab.unavailablePath.isEmpty() ? tab.history.value(tab.position) : tab.unavailablePath, tab.filter,tab.locked,tab.rules});
     const auto view = m_usingSavedView ? m_baselineView : currentView();
     state.currentTab = m_tabBar->currentIndex(); state.sortColumn = view.sortColumn;
-    state.descending = view.descending; return state;
+    state.descending = view.descending;state.view=view;state.treeSplitter=m_tree?m_content->saveState():m_treeState;return state;
 }
 int FilePanel::restoreSession(const PanelSession &state) {
     if (state.tabs.isEmpty()) return 0;
@@ -456,13 +463,15 @@ int FilePanel::restoreSession(const PanelSession &state) {
     for (const auto &saved : state.tabs) {
         const QFileInfo info(saved.path); const auto resolved = info.isDir() ? info.canonicalFilePath() : QString{};
         const bool missing = resolved.isEmpty(); if (missing) ++unavailable;
-        m_tabs.append(Tab{{missing ? fallback : resolved}, 0, saved.filter, missing ? saved.path : QString{}});
+        m_tabs.append(Tab{{missing ? fallback : resolved}, 0, saved.filter, missing ? saved.path : QString{},saved.locked,saved.rules});
         const auto display = missing ? fallback : resolved;
         m_tabBar->addTab(QFileInfo(display).fileName().isEmpty() ? QDir::toNativeSeparators(display) : QFileInfo(display).fileName());
         m_tabBar->setTabToolTip(m_tabBar->count() - 1, QDir::toNativeSeparators(display));
     }
     m_tabBar->setCurrentIndex(qBound(0, state.currentTab, int(m_tabs.size()) - 1)); m_tabBar->setTabsClosable(m_tabs.size() > 1);
     FolderView defaults; defaults.sortColumn = qBound(0, state.sortColumn, 3); defaults.descending = state.descending;
+    if(state.view)defaults=*state.view;
+    m_treeState=state.treeSplitter;if(m_tree&&!m_treeState.isEmpty())m_content->restoreState(m_treeState);
     applyView(defaults);
     m_baselineView = currentView();
     applyPath(); return unavailable;
@@ -472,15 +481,43 @@ bool FilePanel::eventFilter(QObject *watched, QEvent *event) {
         auto *context = static_cast<QContextMenuEvent *>(event);
         if (context->reason() == QContextMenuEvent::Keyboard) { requestContextMenu({}, true); return true; }
     }
+    if(watched==m_view->viewport()&&(event->type()==QEvent::MouseButtonPress||event->type()==QEvent::MouseButtonDblClick)){
+        const auto point=static_cast<QMouseEvent *>(event)->position().toPoint();
+        if(m_view->indexAt(point).isValid()&&!fileIndexAt(m_view,point).isValid())return true;
+    }
     return QWidget::eventFilter(watched, event);
 }
 void FilePanel::requestContextMenu(const QPoint &position, bool keyboard) {
     emit activated();
-    QModelIndex index = keyboard ? filesView()->currentIndex() : filesView()->indexAt(position);
+    QModelIndex index = keyboard ? filesView()->currentIndex() : fileIndexAt(filesView(),position);
     if (!keyboard && index.isValid() && !m_view->selectionModel()->isRowSelected(index.row(), index.parent())) {
         m_view->selectionModel()->select(index, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
     } else if (!keyboard && !index.isValid()) m_view->clearSelection();
     if (index.isValid()) m_view->selectionModel()->setCurrentIndex(index, QItemSelectionModel::NoUpdate);
     const auto point = keyboard ? (index.isValid() ? filesView()->visualRect(index).center() : filesView()->viewport()->rect().center()) : position;
     emit contextMenuRequested(filesView()->viewport()->mapToGlobal(point));
+}
+
+void FilePanel::setTreeVisible(bool visible){
+    if(!visible&&m_tree){m_treeState=m_content->saveState();delete m_tree;m_tree=nullptr;delete m_treeModel;m_treeModel=nullptr;return;}
+    if(visible&&!m_tree){
+        m_treeModel=new QFileSystemModel(this);m_treeModel->setReadOnly(true);m_treeModel->setFilter(QDir::AllDirs|QDir::NoDotAndDotDot|QDir::Drives);m_treeModel->setRootPath({});
+        m_tree=new QTreeView(m_content);m_tree->setObjectName("panelTree");m_tree->setModel(m_treeModel);m_tree->setHeaderHidden(true);m_tree->setUniformRowHeights(true);m_tree->setEditTriggers(QAbstractItemView::NoEditTriggers);m_tree->setContextMenuPolicy(Qt::CustomContextMenu);
+        for(int c=1;c<4;++c)m_tree->hideColumn(c);m_content->insertWidget(0,m_tree);m_content->setCollapsible(0,true);m_content->setCollapsible(1,false);m_content->setSizes({180,500});
+        connect(m_tree,&QTreeView::clicked,this,[this](const QModelIndex &i){emit activated();navigate(m_treeModel->filePath(i));});
+        connect(m_tree,&QTreeView::customContextMenuRequested,this,[this](const QPoint &p){emit activated();emit treeContextMenuRequested(m_tree,p);});
+        if(!m_treeState.isEmpty())m_content->restoreState(m_treeState);
+    }
+    if(m_tree){m_tree->setVisible(visible);if(visible){const auto index=m_treeModel->index(path());m_tree->setCurrentIndex(index);m_tree->scrollTo(index);}}
+}
+bool FilePanel::tabLocked()const{return m_tabBar->currentIndex()>=0&&m_tabs[m_tabBar->currentIndex()].locked;}
+void FilePanel::setTabLocked(bool locked){if(m_tabs.isEmpty())return;m_tabs[m_tabBar->currentIndex()].locked=locked;applyPath();}
+void FilePanel::duplicateTab(){if(m_tabs.isEmpty()||m_tabs.size()>=256)return;const auto original=m_tabs[m_tabBar->currentIndex()];newTab(path());m_tabs[m_tabBar->currentIndex()].filter=original.filter;m_tabs[m_tabBar->currentIndex()].rules=original.rules;m_tabs[m_tabBar->currentIndex()].unavailablePath=original.unavailablePath;applyPath();}
+FolderRules FilePanel::rules()const{return m_tabBar->currentIndex()<0?FolderRules{}:m_tabs[m_tabBar->currentIndex()].rules;}
+QString FilePanel::applyRules(const FolderRules &r){const auto error=validateFolderRules(r);if(!error.isEmpty())return error;m_tabs[m_tabBar->currentIndex()].rules=r;applyPath();return {};}
+void FilePanel::editRules(){const auto value=editFolderRules(rules(),this);if(value)applyRules(*value);}
+void FilePanel::setGrouping(int mode){if(mode<0||mode>3)return;if(mode)setThumbnailPresentation(false,m_thumbnailSize);m_filter->setGrouping(mode);m_view->doItemsLayout();}
+
+QStringList FilePanel::listedPaths(int limit)const{
+    QStringList result;const auto root=filesView()->rootIndex();for(int row=0;row<qMin(qBound(0,limit,256),m_filter->rowCount(root));++row)result.append(m_model->filePath(m_filter->mapToSource(m_filter->index(row,0,root))));return result;
 }

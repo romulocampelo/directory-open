@@ -1,4 +1,5 @@
 #include "batchrenamedialog.h"
+#include "renamerecipedialog.h"
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDateEdit>
@@ -33,6 +34,8 @@ BatchRenameDialog::BatchRenameDialog(QStringList sources, QWidget *parent, QStri
     auto *options = new QHBoxLayout; m_extension = new QCheckBox(tr("Preservar a última extensão dos arquivos"), this); m_extension->setObjectName("renamePreserveExtension"); m_extension->setChecked(true);
     m_case = new QCheckBox(tr("Diferenciar maiúsculas na substituição"), this); m_case->setChecked(true); options->addWidget(m_extension); options->addWidget(m_case); options->addStretch(); layout->addLayout(options);
     auto *hint = new QLabel(tr("Campos: {name} nome, {n} número, {date} data. A substituição atua no nome antes do modelo. A ordem é a exibida no painel; desmarque itens para excluí-los. Até 1.000 itens da mesma pasta. Datas de arquivo não são EXIF."), this); hint->setWordWrap(true); layout->addWidget(hint);
+    m_recipeButton=new QPushButton(tr("Receita de etapas…"),this);m_recipeButton->setObjectName("editRenameRecipe");layout->addWidget(m_recipeButton);
+    connect(m_recipeButton,&QPushButton::clicked,this,[this]{if(m_job||m_applied)return;const QFileInfo example(m_sources.value(0));RenameRecipeDialog dialog(m_recipe,m_extension->isChecked()&&example.isFile()?example.completeBaseName():example.fileName(),this);if(dialog.exec()==QDialog::Accepted){m_recipe=dialog.recipe();m_recipeButton->setText(tr("Receita: %1 (%2 etapas)…").arg(m_recipe.name).arg(m_recipe.rules.size()));invalidate();}});
     m_table = new QTreeWidget(this); m_table->setObjectName("batchRenameRows"); m_table->setColumnCount(4); m_table->setHeaderLabels({tr("Incluir"), tr("Nome atual"), tr("Nome final"), tr("Situação")}); m_table->setRootIsDecorated(false); m_table->setUniformRowHeights(true); m_table->setEditTriggers(QAbstractItemView::NoEditTriggers); m_table->setColumnWidth(0, 65); m_table->header()->setSectionResizeMode(1, QHeaderView::Stretch); m_table->header()->setSectionResizeMode(2, QHeaderView::Stretch); m_table->setColumnWidth(3, 300);
     for (const auto &source : m_sources) { auto *item = new QTreeWidgetItem(m_table, {QString{}, QFileInfo(source).fileName(), {}, {}}); m_rows.insert(source, item); item->setCheckState(0, Qt::Checked); item->setData(0, Qt::UserRole, source); item->setToolTip(1, QDir::toNativeSeparators(source)); } layout->addWidget(m_table, 1);
     m_status = new QLabel(this); m_status->setObjectName("batchRenameStatus"); m_status->setWordWrap(true); m_status->setTextFormat(Qt::PlainText); layout->addWidget(m_status);
@@ -49,7 +52,7 @@ BatchRenameDialog::BatchRenameDialog(QStringList sources, QWidget *parent, QStri
     connect(m_preview, &QPushButton::clicked, this, &BatchRenameDialog::startPreview); connect(m_apply, &QPushButton::clicked, this, &BatchRenameDialog::apply);
     connect(m_close, &QPushButton::clicked, this, &BatchRenameDialog::reject); connect(m_cancel, &QPushButton::clicked, this, [this] { if (m_job) { m_job->cancel(); m_cancel->setEnabled(false); m_status->setText(tr("Cancelamento solicitado; itens já concluídos são preservados.")); } });
     m_timer = new QTimer(this); m_timer->setInterval(150); connect(m_timer, &QTimer::timeout, this, [this] { if (m_job && m_applying && m_cancel->isEnabled()) m_status->setText(tr("Renomeando… %1 de %2 itens processados.").arg(m_job->done()).arg(m_plan.items.size())); });
-    invalidate(); QTimer::singleShot(0, this, &BatchRenameDialog::startPreview);
+    invalidate(); startPreview();
 }
 BatchRenameDialog::~BatchRenameDialog() { if (m_job) { m_job->cancel(); m_job->wait(); } }
 void BatchRenameDialog::reject() { if (m_job) { m_closePending = true; m_job->cancel(); m_cancel->setEnabled(false); m_status->setText(tr("Aguardando o encerramento…")); return; } QDialog::reject(); }
@@ -59,6 +62,7 @@ void BatchRenameDialog::invalidate() {
     m_status->setText(tr("Gere a prévia e confira os nomes. Nenhum item será substituído. Trocas/ciclos de nomes ocupados são conflitos."));
 }
 void BatchRenameDialog::setBusy(bool busy) {
+    m_recipeButton->setEnabled(!busy&&!m_applied);
     for (auto *widget : QList<QWidget *>{m_pattern,m_find,m_replace,m_start,m_step,m_digits,m_extension,m_case,m_dateSource,m_dateFormat,m_table,m_preview}) widget->setEnabled(!busy && !m_applied);
     m_date->setEnabled(!busy && !m_applied && m_dateSource->currentIndex() == 2); m_confirm->setEnabled(!busy && !m_applied); m_apply->setEnabled(false); m_cancel->setEnabled(busy);
 }
@@ -66,6 +70,7 @@ void BatchRenameDialog::startPreview() {
     if (m_job || m_applied) return;
     QStringList sources; for (int i = 0; i < m_table->topLevelItemCount(); ++i) if (m_table->topLevelItem(i)->checkState(0) == Qt::Checked) sources.append(m_table->topLevelItem(i)->data(0, Qt::UserRole).toString());
     BatchRenameOptions options; options.pattern = m_pattern->text(); options.find = m_find->text(); options.replacement = m_replace->text(); options.preserveExtension = m_extension->isChecked(); options.caseSensitive = m_case->isChecked(); options.start = m_start->value(); options.step = m_step->value(); options.digits = m_digits->value(); options.dateSource = RenameDateSource(m_dateSource->currentIndex()); options.dateFormat = m_dateFormat->currentText(); options.fixedDate = m_date->date();
+    options.recipe=m_recipe;
     m_confirm->setChecked(false); setBusy(true); m_status->setText(tr("Preparando prévia…")); m_job = new BatchRenameJob(sources, options, this);
     connect(m_job, &QThread::finished, this, [this] {
         m_job->wait(); m_plan = m_job->plan(); m_job->deleteLater(); m_job = nullptr; setBusy(false);

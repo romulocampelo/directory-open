@@ -88,6 +88,7 @@ bool BatchRenamePlan::valid() const {
 int BatchRenamePlan::changes() const { int count = 0; for (const auto &item : items) if (!item.unchanged) ++count; return count; }
 BatchRenamePlan planBatchRename(const QStringList &sources, const BatchRenameOptions &options, const std::atomic_bool &cancel) {
     BatchRenamePlan plan;
+    plan.error=validateRenameRules(options.recipe.rules);if(!plan.error.isEmpty())return plan;
     if (sources.isEmpty() || sources.size() > 1000) { plan.error = "Selecione de 1 a 1.000 itens da mesma pasta."; return plan; }
     if (options.pattern.size() > 1024 || options.find.size() > 1024 || options.replacement.size() > 1024 || options.start < 0 || options.start > 1000000000
         || options.step < 1 || options.step > 1000000 || options.digits < 1 || options.digits > 10
@@ -119,6 +120,7 @@ BatchRenamePlan planBatchRename(const QStringList &sources, const BatchRenameOpt
         }
         bool bounded = true;
         if (options.pattern.contains("{name}")) base = replaceLiteral(base, options, bounded);
+        if(bounded&&options.pattern.contains("{name}")){const auto transformed=applyRenameRules(base,options.recipe.rules);base=transformed.text;if(!transformed.error.isEmpty()&&item.error.isEmpty())item.error=transformed.error;}
         const QDateTime stamp = options.dateSource == RenameDateSource::Created ? date(item.identity.created)
             : options.dateSource == RenameDateSource::Fixed ? QDateTime(options.fixedDate, QTime(0, 0))
             : date(item.identity.modified);

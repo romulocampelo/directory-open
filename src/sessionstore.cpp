@@ -14,7 +14,14 @@
 
 namespace {
 constexpr qint64 maxRecordBytes = 1024 * 1024;
-constexpr int maxTabs = 256;
+struct ToolField {const char *key;QString ToolSettings::*member;};
+constexpr ToolField toolFields[]{
+    {"restic",&ToolSettings::restic},{"rclone",&ToolSettings::rclone},{"ripgrep",&ToolSettings::ripgrep},
+    {"rcloneConfig",&ToolSettings::rcloneConfig},{"repository",&ToolSettings::repository},
+    {"exiftool",&ToolSettings::exiftool},{"magick",&ToolSettings::magick},{"ffmpeg",&ToolSettings::ffmpeg},
+    {"ffprobe",&ToolSettings::ffprobe},{"duplicateFinderProject",&ToolSettings::duplicateFinderProject},
+    {"python",&ToolSettings::python},{"scriptManifest",&ToolSettings::scriptManifest}
+};
 struct Record { bool exists = false; QByteArray bytes; QString error; };
 Record readRecord(const QString &path) {
     Record record; const QFileInfo info(path); record.exists = info.exists() || info.isSymLink();
@@ -29,18 +36,7 @@ Record readRecord(const QString &path) {
 }
 QByteArray digest(const QByteArray &bytes) { return QCryptographicHash::hash(bytes, QCryptographicHash::Sha256); }
 bool integer(const QJsonValue &v, int minimum, int maximum) { return v.isDouble() && v.toDouble() == v.toInt(-1) && v.toInt(-1) >= minimum && v.toInt(-1) <= maximum; }
-bool decodePanel(const QJsonValue &value, PanelSession &panel) {
-    if (!value.isObject()) return false; const auto object = value.toObject();
-    if (!object["tabs"].isArray()) return false; const auto tabs = object["tabs"].toArray();
-    if (tabs.isEmpty() || tabs.size() > maxTabs || !integer(object["currentTab"], 0, int(tabs.size()) - 1)
-        || !integer(object["sortColumn"], 0, 3) || !object["descending"].isBool()) return false;
-    for (const auto &entry : tabs) {
-        if (!entry.isObject()) return false; const auto tab = entry.toObject();
-        if (!tab["path"].isString() || !QDir::isAbsolutePath(tab["path"].toString()) || tab["path"].toString().contains(QChar(0)) || !tab["filter"].isString()) return false;
-        panel.tabs.append({tab["path"].toString(), tab["filter"].toString()});
-    }
-    panel.currentTab = object["currentTab"].toInt(); panel.sortColumn = object["sortColumn"].toInt(); panel.descending = object["descending"].toBool(); return true;
-}
+
 bool decodeBytes(const QJsonValue &v, QByteArray &bytes) {
     if (!v.isString()) return false;
     const auto decoded = QByteArray::fromBase64Encoding(v.toString().toLatin1(), QByteArray::AbortOnBase64DecodingErrors);
@@ -52,6 +48,33 @@ SessionLoadState parse(const QByteArray &bytes, WindowSession &session, QJsonObj
     document = json.object();
     if (!integer(document["version"], 1, 2147483647)) return SessionLoadState::Invalid;
     if (document["version"].toInt() != 1) return SessionLoadState::Unsupported;
+    if(document.contains("layouts")){const auto v=decodeWorkspaces(document["layouts"]);if(!v)return SessionLoadState::Invalid;session.layouts=*v;}
+    if(document.contains("tabGroups")){const auto v=decodeTabGroups(document["tabGroups"]);if(!v)return SessionLoadState::Invalid;session.tabGroups=*v;}
+    if(!validateWorkspaces(session.layouts,session.tabGroups).isEmpty())return SessionLoadState::Invalid;
+    if(document.contains("independentTrees")){if(!document["independentTrees"].isBool())return SessionLoadState::Invalid;session.independentTrees=document["independentTrees"].toBool();}
+    if (document.contains("interface")) {
+        const auto ui = decodeUiCustomization(document["interface"]);
+        if (!ui) return SessionLoadState::Invalid;
+        session.ui = *ui;
+    }
+    if (document.contains("tools")) {
+        if (!document["tools"].isObject()) return SessionLoadState::Invalid;
+        const auto tools = document["tools"].toObject();
+        for (const auto &field : toolFields) {
+            if (!tools.contains(field.key)) continue;
+            const auto value=tools[field.key];
+            if (!value.isString() || value.toString().size() > 32768 || value.toString().contains(QChar(0))) return SessionLoadState::Invalid;
+            session.tools.*field.member=value.toString();
+        }
+    }
+    if (document.contains("nativeContextMenu")) {
+        if (!document["nativeContextMenu"].isBool()) return SessionLoadState::Invalid;
+        session.nativeContextMenu = document["nativeContextMenu"].toBool();
+    }
+    if (document.contains("teraCopyForCopy")) {
+        if (!document["teraCopyForCopy"].isBool()) return SessionLoadState::Invalid;
+        session.teraCopyForCopy = document["teraCopyForCopy"].toBool();
+    }
     if (document.contains("folderViews")) {
         session.folderViews = decodeFolderViews(document["folderViews"]);
         if (!session.folderViews) return SessionLoadState::Invalid;
@@ -70,17 +93,16 @@ SessionLoadState parse(const QByteArray &bytes, WindowSession &session, QJsonObj
         if (!validateFavorites(favorites).isEmpty()) return SessionLoadState::Invalid;
         session.favorites = favorites;
     }
-    if (!decodePanel(document["left"], session.left) || !decodePanel(document["right"], session.right)
+    const auto left=decodePanelSession(document["left"]),right=decodePanelSession(document["right"]);
+    if (!left || !right
         || !integer(document["activePanel"], 0, 1) || !decodeBytes(document["geometry"], session.geometry)
         || !decodeBytes(document["windowState"], session.windowState) || !decodeBytes(document["splitterState"], session.splitterState)) return SessionLoadState::Invalid;
     for (const auto &key : {"dark", "dualPane", "treeVisible", "previewVisible"}) if (!document[key].isBool()) return SessionLoadState::Invalid;
+    session.left=*left;session.right=*right;
     session.dark = document["dark"].toBool(); session.dualPane = document["dualPane"].toBool(); session.treeVisible = document["treeVisible"].toBool();
     session.previewVisible = document["previewVisible"].toBool(); session.activePanel = document["activePanel"].toInt(); return SessionLoadState::Loaded;
 }
-QJsonObject encodePanel(const PanelSession &panel) {
-    QJsonArray tabs; for (const auto &tab : panel.tabs) tabs.append(QJsonObject{{"path", tab.path}, {"filter", tab.filter}});
-    return {{"tabs", tabs}, {"currentTab", panel.currentTab}, {"sortColumn", panel.sortColumn}, {"descending", panel.descending}};
-}
+
 QString writeRecord(const QString &path, const QByteArray &bytes) {
     if (QFileInfo(path).isSymLink() || (QFileInfo::exists(path) && !QFileInfo(path).isFile())) return "O destino do registro não é um arquivo normal.";
     QSaveFile file(path); file.setDirectWriteFallback(false);
@@ -132,10 +154,18 @@ QString SessionStore::save(const WindowSession &session) {
     if (!m_loaded) load();
     if (!m_writable) return "O registro anterior da sessão será preservado.";
     auto document = m_document;
-    document["version"] = 1; document["left"] = encodePanel(session.left); document["right"] = encodePanel(session.right);
+    document["version"] = 1; document["left"] = encodePanelSession(session.left); document["right"] = encodePanelSession(session.right);
     document["geometry"] = QString::fromLatin1(session.geometry.toBase64()); document["windowState"] = QString::fromLatin1(session.windowState.toBase64());
     document["splitterState"] = QString::fromLatin1(session.splitterState.toBase64()); document["dark"] = session.dark; document["dualPane"] = session.dualPane;
     document["treeVisible"] = session.treeVisible; document["previewVisible"] = session.previewVisible; document["activePanel"] = session.activePanel;
+    document["nativeContextMenu"] = session.nativeContextMenu;
+    document["teraCopyForCopy"] = session.teraCopyForCopy;
+    document["independentTrees"] = session.independentTrees;
+    document["layouts"]=encodeWorkspaces(session.layouts);document["tabGroups"]=encodeTabGroups(session.tabGroups);
+    document["interface"] = encodeUiCustomization(session.ui);
+    auto tools=document["tools"].toObject();
+    for(const auto &field:toolFields)tools[field.key]=session.tools.*field.member;
+    document["tools"]=tools;
     if (session.favorites) {
         QJsonArray entries;
         for (const auto &entry : *session.favorites) entries.append(QJsonObject{{"id", entry.id}, {"label", entry.label}, {"path", entry.path}});

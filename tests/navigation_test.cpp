@@ -4,6 +4,7 @@
 #include <QAction>
 #include <QComboBox>
 #include <QCryptographicHash>
+#include <QDesktopServices>
 #include <QDir>
 #include <QDockWidget>
 #include <QFile>
@@ -17,6 +18,17 @@
 #include <QTest>
 #include <QTreeView>
 #include <QTimer>
+#include <QUrl>
+
+class FileOpenRecorder final : public QObject {
+    Q_OBJECT
+public:
+    FileOpenRecorder() { QDesktopServices::setUrlHandler("file", this, "open"); }
+    ~FileOpenRecorder() override { QDesktopServices::unsetUrlHandler("file"); }
+    QList<QUrl> urls;
+public slots:
+    void open(const QUrl &url) { urls.append(url); }
+};
 
 class NavigationTest : public QObject {
     Q_OBJECT
@@ -37,6 +49,56 @@ private:
         });
     }
 private slots:
+    void doubleClickOpensFileAndNavigatesFolder_data() {
+        QTest::addColumn<bool>("right"); QTest::addColumn<bool>("thumbnails");
+        QTest::newRow("left-details") << false << false;
+        QTest::newRow("right-details") << true << false;
+        QTest::newRow("left-thumbnails") << false << true;
+        QTest::newRow("right-thumbnails") << true << true;
+    }
+    void doubleClickOpensFileAndNavigatesFolder() {
+        QFETCH(bool, right); QFETCH(bool, thumbnails);
+        QTemporaryDir fixture; QVERIFY(fixture.isValid());
+        const auto left = fixture.path() + "/left", rightPath = fixture.path() + "/right";
+        QVERIFY(QDir().mkpath(left)); QVERIFY(QDir().mkpath(rightPath));
+        const auto folder = right ? rightPath : left;
+        const QString name = QString::fromUtf8("ação # 100%.txt");
+        const auto file = folder + '/' + name;
+        writeFile(file, "double click fixture"); QVERIFY(QDir(folder).mkdir("subfolder"));
+        FileOpenRecorder recorder;
+        MainWindow window(left, rightPath, false); window.show();
+        auto *panel = right ? window.rightPanel() : window.leftPanel();
+        QTRY_COMPARE(panel->visibleCount(), 2);
+        if (thumbnails) panel->findChild<QAction *>("viewThumbnails")->trigger();
+        auto *view = panel->filesView();
+        QCoreApplication::processEvents(); view->doItemsLayout();
+        auto find = [&](const QString &wanted) {
+            for (int row = 0; row < view->model()->rowCount(view->rootIndex()); ++row) {
+                const auto index = view->model()->index(row, 0, view->rootIndex());
+                if (index.data().toString() == wanted) return index;
+            }
+            return QModelIndex{};
+        };
+        const auto index = find(name); QVERIFY(index.isValid()); view->scrollTo(index);
+        QTRY_VERIFY(view->viewport()->rect().contains(view->visualRect(index).center()));
+        QTRY_COMPARE(view->indexAt(view->visualRect(index).center()), index);
+        const auto point = view->visualRect(index).center();
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, point);
+        QCOMPARE(panel->selectedPath(), file); QCOMPARE(recorder.urls.size(), 0);
+        QTest::mouseDClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, point);
+        QTRY_COMPARE(recorder.urls.size(), 1);
+        QCOMPARE(recorder.urls.first(), QUrl::fromLocalFile(file));
+        QCOMPARE(recorder.urls.first().toLocalFile(), file);
+        QCOMPARE(window.session().activePanel, right ? 1 : 0);
+        window.findChild<QAction *>("open")->trigger();
+        QCOMPARE(recorder.urls.size(), 2); QCOMPARE(recorder.urls.last(), QUrl::fromLocalFile(file));
+        const auto directory = find("subfolder"); QVERIFY(directory.isValid()); view->scrollTo(directory);
+        const auto directoryPoint = view->visualRect(directory).center();
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, directoryPoint);
+        QTest::mouseDClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, directoryPoint);
+        QTRY_COMPARE(panel->path(), folder + "/subfolder");
+        QCOMPARE(recorder.urls.size(), 2); QCOMPARE(contents(file), QByteArray("double click fixture"));
+    }
     void invalidPathPreservesFolderAndHistory() {
         QTemporaryDir fixture; QVERIFY(fixture.isValid());
         QVERIFY(QDir(fixture.path()).mkdir("one"));

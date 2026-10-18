@@ -1,4 +1,5 @@
 #include "operationdialog.h"
+#include "teracopy.h"
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QDir>
@@ -9,6 +10,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QPushButton>
+#include <QStandardItemModel>
 #include <QVBoxLayout>
 
 OperationDialog::OperationDialog(OperationRequest request, QWidget *parent) : QDialog(parent), m_initial(std::move(request)) {
@@ -49,6 +51,18 @@ OperationDialog::OperationDialog(OperationRequest request, QWidget *parent) : QD
         m_conflict->addItem(tr("Manter os dois, criando outro nome"), int(OperationConflict::KeepBoth));
         m_conflict->setCurrentIndex(m_initial.conflict == OperationConflict::KeepBoth ? 1 : 0);
         form->addRow(tr("Nomes repetidos:"), m_conflict);
+        if (kind == OperationKind::Copy) {
+            m_engine = new QComboBox(this); m_engine->setObjectName("operationEngine");
+            m_engine->addItem(tr("Windows"), int(TransferEngine::Windows));
+            const auto executable = teraCopyExecutable();
+            m_engine->addItem(executable.isEmpty() ? tr("TeraCopy — não encontrado") : tr("TeraCopy"), int(TransferEngine::TeraCopy));
+            m_engine->setItemData(1, QDir::toNativeSeparators(executable), Qt::ToolTipRole);
+            if (executable.isEmpty()) static_cast<QStandardItemModel *>(m_engine->model())->item(1)->setEnabled(false);
+            // Preserve an explicit preference even if the provider disappeared: the
+            // confirmation reports it, and the user can choose Windows explicitly.
+            m_engine->setCurrentIndex(m_initial.engine == TransferEngine::TeraCopy ? 1 : 0);
+            form->insertRow(0, tr("Copiar com:"), m_engine);
+        }
     } else if (kind != OperationKind::Trash) {
         const auto folder = kind == OperationKind::Rename ? QFileInfo(m_initial.sources.first()).absolutePath() : m_initial.destination;
         auto *path = new QLabel(QDir::toNativeSeparators(folder), this); path->setWordWrap(true); path->setTextInteractionFlags(Qt::TextSelectableByMouse);
@@ -60,7 +74,18 @@ OperationDialog::OperationDialog(OperationRequest request, QWidget *parent) : QD
         else m_name->selectAll();
     }
     layout->addLayout(form);
-    auto *description = new QLabel(hint, this); description->setWordWrap(true); layout->addWidget(description);
+    auto *description = new QLabel(hint, this); description->setObjectName("operationHint"); description->setWordWrap(true);
+    description->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum); layout->addWidget(description);
+    if (m_engine) {
+        const auto updateEngine = [this, description, hint] {
+            const bool external = m_engine->currentData().toInt() == int(TransferEngine::TeraCopy);
+            m_conflict->setEnabled(!external);
+            if (external) m_conflict->setCurrentIndex(1);
+            description->setText(external ? tr("O TeraCopy controla progresso, cancelamento e verificação na janela dele. Confira o resultado nessa janela; o DirOpen informa somente o encaminhamento. Arquivos existentes serão preservados e sua escolha será lembrada.") : hint);
+            if (external) resize(width(), qMax(height(), 520));
+        };
+        connect(m_engine, &QComboBox::currentIndexChanged, this, updateEngine); updateEngine();
+    }
     m_error = new QLabel(this); m_error->setObjectName("operationError"); m_error->setWordWrap(true); m_error->setStyleSheet("color: #c95248;"); layout->addWidget(m_error);
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Cancel, this);
     buttons->button(QDialogButtonBox::Cancel)->setText(tr("Cancelar"));
@@ -69,7 +94,10 @@ OperationDialog::OperationDialog(OperationRequest request, QWidget *parent) : QD
     else confirm->setDefault(true);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
     connect(confirm, &QPushButton::clicked, this, [this] {
-        const auto error = validateOperationRequest(this->request()); m_error->setText(error);
+        const auto selected = this->request();
+        auto error = validateOperationRequest(selected);
+        if (error.isEmpty() && selected.engine == TransferEngine::TeraCopy && teraCopyExecutable().isEmpty()) error = tr("TeraCopy não encontrado. Escolha Windows para copiar.");
+        m_error->setText(error);
         if (error.isEmpty()) accept();
     });
     layout->addWidget(buttons);
@@ -79,5 +107,6 @@ OperationRequest OperationDialog::request() const {
     if (m_destination) request.destination = QDir::fromNativeSeparators(m_destination->text().trimmed());
     if (m_conflict) request.conflict = OperationConflict(m_conflict->currentData().toInt());
     if (m_name) request.name = m_name->text();
+    if (m_engine) request.engine = TransferEngine(m_engine->currentData().toInt());
     return request;
 }

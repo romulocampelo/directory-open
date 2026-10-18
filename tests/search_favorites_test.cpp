@@ -6,6 +6,7 @@
 #include <QAction>
 #include <QApplication>
 #include <QCheckBox>
+#include <QComboBox>
 #include <QFile>
 #include <QDir>
 #include <QJsonDocument>
@@ -165,6 +166,7 @@ private slots:
         QTemporaryDir fixture; QVERIFY(fixture.isValid()); QVERIFY(QDir(fixture.path()).mkpath("Documentos/2026")); write(fixture.path() + "/Documentos/2026/Relatório.pdf"); write(fixture.path() + "/Documentos/2026/Planejamento.pdf");
         MainWindow window(fixture.path(), fixture.path(), false); window.show(); window.findChild<QAction *>("searchFiles")->trigger();
         QPointer<SearchDialog> dialog = window.findChild<SearchDialog *>(); QVERIFY(dialog); dialog->findChild<QLineEdit *>("searchName")->setText("*.pdf"); dialog->findChild<QCheckBox *>("searchWildcard")->setChecked(true);
+        auto *engine = dialog->findChild<QComboBox *>("searchEngine"); engine->setCurrentIndex(engine->findData(int(SearchEngine::Direct)));
         auto *start = dialog->findChild<QPushButton *>("startSearch"); start->click(); QTRY_VERIFY(start->isEnabled()); auto *results = dialog->findChild<QTreeWidget *>("searchResults"); QCOMPARE(results->topLevelItemCount(), 2);
         const auto capture = qEnvironmentVariable("NAVEGA_SEARCH_CAPTURE");
         if (!capture.isEmpty()) { QVERIFY(QTest::qWaitForWindowExposed(dialog)); QVERIFY(dialog->grab().save(capture)); }

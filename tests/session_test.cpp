@@ -8,6 +8,7 @@
 #include <QDir>
 #include <QDockWidget>
 #include <QFile>
+#include <QFileSystemModel>
 #include <QHeaderView>
 #include <QJsonDocument>
 #include <QJsonArray>
@@ -35,6 +36,9 @@ private:
         QApplication::sendEvent(keyboard ? static_cast<QWidget *>(view) : view->viewport(), &event);
     }
 private slots:
+    void toolPathsRoundTripWithoutDiscardingFutureFields() {
+        QTemporaryDir fixture;const auto file=fixture.filePath("session.json");SessionStore initial(file);QVERIFY(initial.save(state(fixture.path())).isEmpty());auto document=QJsonDocument::fromJson(read(file)).object();auto tools=document["tools"].toObject();const QJsonObject future{{"version",2},{"options",QJsonArray{"keep","opaque"}}};tools["futureTool"]=future;tools["python"]="C:/Python/python.exe";tools["scriptManifest"]="C:/Scripts/ação.json";document["tools"]=tools;write(file,QJsonDocument(document).toJson());SessionStore current(file);auto loaded=current.load();QCOMPARE(loaded.state,SessionLoadState::Loaded);QCOMPARE(loaded.session.tools.python,QString("C:/Python/python.exe"));QCOMPARE(loaded.session.tools.scriptManifest,QString("C:/Scripts/ação.json"));loaded.session.tools.python="D:/Python/python.exe";QVERIFY(current.save(loaded.session).isEmpty());const auto saved=QJsonDocument::fromJson(read(file)).object()["tools"].toObject();QCOMPARE(saved["futureTool"].toObject(),future);QCOMPARE(saved["python"].toString(),QString("D:/Python/python.exe"));
+    }
     void closeAndReopenRestoresTabsFiltersThemeLayoutAndPosition() {
         QTemporaryDir fixture; QVERIFY(fixture.isValid()); const auto file = fixture.path() + "/config/session.json";
         for (const auto &name : {"left", "right", "other"}) QVERIFY(QDir(fixture.path()).mkdir(name));
@@ -45,6 +49,7 @@ private slots:
             auto *leftView = window.leftPanel()->findChild<QTreeView *>("files"); leftView->sortByColumn(1, Qt::DescendingOrder);
             window.rightPanel()->newTab(fixture.path()); window.rightPanel()->setFilter("projeto");
             window.findChild<QAction *>("darkTheme")->setChecked(true); window.findChild<QAction *>("treeVisible")->setChecked(false);
+            window.findChild<QAction *>("nativeContextMenu")->setChecked(false);
             window.findChild<QDockWidget *>("previewDock")->show(); window.resize(1180, 720); window.move(55, 70);
             window.findChild<QSplitter *>("fileSplit")->setSizes({0, 460, 580});
             auto *rightView = window.rightPanel()->findChild<QTreeView *>("files"); rightView->setFocus(); QTRY_VERIFY(rightView->hasFocus());
@@ -58,6 +63,7 @@ private slots:
         QCOMPARE(actual.left.tabs[0].filter, expected.left.tabs[0].filter); QCOMPARE(actual.left.tabs[1].filter, expected.left.tabs[1].filter);
         QCOMPARE(actual.right.tabs[1].filter, expected.right.tabs[1].filter); QCOMPARE(actual.left.sortColumn, 1); QVERIFY(actual.left.descending);
         QVERIFY(actual.dark); QVERIFY(actual.dualPane); QVERIFY(!actual.treeVisible); QVERIFY(actual.previewVisible); QCOMPARE(actual.activePanel, 1);
+        QVERIFY(!actual.nativeContextMenu); QVERIFY(!reopened.findChild<QAction *>("nativeContextMenu")->isChecked());
         const auto available = reopened.screen()->availableGeometry();
         if (available.contains(QRect(position, size))) { QCOMPARE(reopened.size(), size); QVERIFY((reopened.pos() - position).manhattanLength() <= 4); }
         else { // restoreGeometry intentionally keeps the window on a smaller screen.
@@ -84,6 +90,20 @@ private slots:
         }
         MainWindow reopened({}, {}, false, file); reopened.show(); QCOMPARE(reopened.leftPanel()->path(), fixture.path());
         QCOMPARE(reopened.leftPanel()->tabCount(), 2); QVERIFY(!reopened.session().dualPane); QCOMPARE(reopened.session().activePanel, 0); QVERIFY(reopened.close());
+    }
+    void previousSessionWithoutMenuSettingKeepsNativeDefaultAndBackup() {
+        QTemporaryDir fixture; QVERIFY(fixture.isValid()); const auto file = fixture.path() + "/session.json";
+        SessionStore initial(file); QVERIFY(initial.save(state(fixture.path())).isEmpty());
+        auto document = QJsonDocument::fromJson(read(file)).object(); document.remove("nativeContextMenu");
+        const auto previous = QJsonDocument(document).toJson(); write(file, previous);
+        {
+            MainWindow window({}, {}, false, file);
+            QVERIFY(window.session().nativeContextMenu); QVERIFY(window.findChild<QAction *>("nativeContextMenu")->isChecked());
+            window.findChild<QAction *>("nativeContextMenu")->setChecked(false); QVERIFY(window.close());
+        }
+        QCOMPARE(read(file + ".bak"), previous);
+        SessionStore updated(file); const auto loaded = updated.load(); QCOMPARE(loaded.state, SessionLoadState::Loaded); QVERIFY(!loaded.session.nativeContextMenu);
+        QVERIFY(updated.save(loaded.session).isEmpty()); QCOMPARE(read(file + ".bak"), previous);
     }
     void explicitStartupPathOverridesOnlyThatPanel() {
         QTemporaryDir fixture; QVERIFY(fixture.isValid()); QVERIFY(QDir(fixture.path()).mkdir("override")); const auto file = fixture.path() + "/session.json";
@@ -138,6 +158,7 @@ private slots:
         SessionStore valid(validFile); QVERIFY(valid.save(state(fixture.path())).isEmpty()); const auto base = QJsonDocument::fromJson(read(validFile)).object();
         QVector<QJsonObject> cases;
         auto changed = base; changed["dark"] = "true"; cases.append(changed);
+        changed = base; changed["nativeContextMenu"] = "false"; cases.append(changed);
         changed = base; changed["activePanel"] = 1.5; cases.append(changed);
         changed = base; changed["geometry"] = "!invalid-base64"; cases.append(changed);
         changed = base; auto panel = changed["left"].toObject(); panel["currentTab"] = 9; changed["left"] = panel; cases.append(changed);
@@ -199,6 +220,27 @@ private slots:
         auto *view = window.leftPanel()->findChild<QTreeView *>("files");
         QTimer::singleShot(0, &window, [&] { auto *menu = window.findChild<QMenu *>("fileContextMenu"); if (menu) { window.findChild<QAction *>("openFolderInTab")->trigger(); menu->close(); } });
         openContext(view, view->visualRect(view->model()->index(0, 0, view->rootIndex())).center()); QCOMPARE(window.leftPanel()->tabCount(), 2); QCOMPARE(window.leftPanel()->path(), fixture.path() + "/folder");
+    }
+    void treeContextUsesClickedFolderAndConfirmsTrash() {
+        QTemporaryDir fixture; QVERIFY(fixture.isValid()); QVERIFY(QDir(fixture.path()).mkdir("folder")); write(fixture.path() + "/keep.txt", "keep");
+        MainWindow window(fixture.path(), fixture.path(), false); window.show();
+        auto *tree = window.findChild<QTreeView *>("folderTree"); auto *model = qobject_cast<QFileSystemModel *>(tree->model()); QVERIFY(model);
+        tree->setRootIndex(model->index(fixture.path()));
+        QTRY_VERIFY(model->index(fixture.path() + "/folder").isValid());
+        const auto index = model->index(fixture.path() + "/folder"); tree->scrollTo(index);
+        bool checked = false, confirmed = false;
+        QTimer::singleShot(0, &window, [&] {
+            auto *menu = window.findChild<QMenu *>("treeContextMenu"); if (!menu) return;
+            checked = window.leftPanel()->path() == fixture.path();
+            QTimer::singleShot(0, &window, [&] {
+                auto *dialog = window.findChild<OperationDialog *>("operationDialog"); if (!dialog) return;
+                confirmed = dialog->request().sources == QStringList{fixture.path() + "/folder"}; dialog->reject();
+            });
+            for (auto *action : menu->actions()) if (action->text() == "Enviar à Lixeira…") { action->trigger(); break; }
+            menu->close();
+        });
+        openContext(tree, tree->visualRect(index).center()); QVERIFY(checked); QVERIFY(confirmed);
+        QVERIFY(QFileInfo(fixture.path() + "/folder").isDir()); QCOMPARE(read(fixture.path() + "/keep.txt"), QByteArray("keep"));
     }
 };
 QTEST_MAIN(SessionTest)

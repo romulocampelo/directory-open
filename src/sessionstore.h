@@ -5,22 +5,25 @@
 #include <QVector>
 #include <optional>
 #include "folderview.h"
+#include "specializedtools.h"
+#include "uicustomization.h"
+#include "workspace.h"
 
 struct FavoriteEntry { QString id, label, path; };
 QString validateFavorites(const QVector<FavoriteEntry> &favorites);
 
-struct TabSession { QString path; QString filter; };
-struct PanelSession {
-    QVector<TabSession> tabs;
-    int currentTab = 0;
-    int sortColumn = 0;
-    bool descending = false;
-};
 struct WindowSession {
     PanelSession left, right;
     QByteArray geometry, windowState, splitterState;
     bool dark = false, dualPane = true, treeVisible = true, previewVisible = false;
+    bool nativeContextMenu = true;
+    bool teraCopyForCopy = false;
+    bool independentTrees = false;
+    ToolSettings tools;
+    UiCustomization ui;
     int activePanel = 0;
+    QVector<SavedWorkspace> layouts;
+    QVector<SavedTabGroup> tabGroups;
     // Omission identifies pre-favorites sessions; an empty array stays empty.
     std::optional<QVector<FavoriteEntry>> favorites;
     std::optional<QVector<FolderViewEntry>> folderViews;

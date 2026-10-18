@@ -15,6 +15,7 @@ struct FolderView {
     int thumbnailSize = 144;
     int sortColumn = 0;
     bool descending = false;
+    int grouping = 0;
     std::array<int, 3> order{1, 2, 3};
     std::array<int, 3> widths{90, 120, 145};
     std::array<bool, 3> visible{true, true, true};
@@ -23,6 +24,9 @@ struct FolderView {
 struct FolderViewEntry { QString path; FolderView view; };
 
 QString folderViewKey(const QString &path);
+QString validateFolderView(const FolderView &view);
+std::optional<FolderView> decodeFolderView(const QJsonValue &value);
+QJsonObject encodeFolderView(const FolderView &view);
 QString validateFolderViews(const QVector<FolderViewEntry> &entries);
 std::optional<QVector<FolderViewEntry>> decodeFolderViews(const QJsonValue &value);
 QJsonArray encodeFolderViews(const QVector<FolderViewEntry> &entries);

@@ -16,6 +16,8 @@ protected:
 private:
     QStringList m_sources;
     QString m_historyRoot;
+    RenameRecipe m_recipe;
+    QPushButton *m_recipeButton;
     QHash<QString, QTreeWidgetItem *> m_rows;
     QLineEdit *m_pattern, *m_find, *m_replace;
     QCheckBox *m_extension, *m_case, *m_confirm;

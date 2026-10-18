@@ -1,6 +1,7 @@
 #include <windows.h>
 #include "previewloader.h"
 #include "imagepreview.h"
+#include "documenttext.h"
 #include "pdfrenderer.h"
 #include <QDateTime>
 #include <QFile>
@@ -21,6 +22,16 @@ PreviewResult decode(const PreviewRequest &request, PdfRenderer &pdf, const std:
     PreviewResult result; result.path = request.path; result.serial = request.serial;
     const auto stale = [&] { return latest.load() != request.serial; };
     auto fail = [&](const QString &message) { result.kind = PreviewKind::Error; result.message = message; return result; };
+    if (request.pdfText.action != PdfTextAction::None) {
+        result.pdfInteraction = true; result.kind = PreviewKind::Pdf;
+        result.pdfText = pdf.interact(request.pdfText,stale);
+        if (result.pdfText.found && request.pdfText.action == PdfTextAction::Find && result.pdfText.page != request.page) {
+            const auto rendered = pdf.renderPage(result.pdfText.page,{1800,2400},stale);
+            if (!rendered.message.isEmpty()) { result.pdfText.found = false; result.pdfText.complete = false; result.pdfText.message = rendered.message; }
+            else { result.image = rendered.image; result.originalSize = rendered.originalSize; result.pages = rendered.pages; result.page = rendered.page; result.pdfPointSize = rendered.pointSize; }
+        }
+        return result;
+    }
     if (request.path.isEmpty()) { pdf.clear(); return result; }
     const QFileInfo before(request.path);
     if (before.isDir()) { pdf.clear(); result.message = "Pasta: " + request.path; return result; }
@@ -32,7 +43,8 @@ PreviewResult decode(const PreviewRequest &request, PdfRenderer &pdf, const std:
     QImageReader probe(&file);
     const bool isImage = !isPdf && probe.canRead();
     if (stale()) return result;
-    if (isPdf || isImage) {
+    const bool isDocument=!isPdf&&!isImage&&supportsDocumentText(before.suffix());
+    if (isPdf || isImage || isDocument) {
         if (file.size() > maxFileBytes) { pdf.clear(); return fail("Este arquivo excede o limite de 64 MiB do visualizador."); }
         file.seek(0); const auto bytes = file.read(maxFileBytes + 1);
         if (bytes.size() > maxFileBytes || file.error() != QFileDevice::NoError) { pdf.clear(); return fail("Leitura incompleta ou arquivo acima do limite."); }
@@ -42,8 +54,13 @@ PreviewResult decode(const PreviewRequest &request, PdfRenderer &pdf, const std:
             pdf.clear(); return fail("O arquivo mudou durante a leitura. Use Atualizar no visualizador.");
         }
         if (stale()) return result;
+        if(isDocument){
+            pdf.clear();auto document=extractDocumentText(bytes,before.suffix(),stale);if(document.cancelled)return result;
+            if(!document.complete&&document.text.isEmpty())return fail(document.message);
+            result.kind=PreviewKind::Document;result.text=std::move(document.text);result.message=document.message;result.truncated=!document.complete;result.encoding="Texto extraído — "+before.suffix().toUpper();return result;
+        }
         if (isImage) {
-            pdf.clear(); const auto decoded = decodeImagePreview(bytes, 4096);
+            pdf.clear(); const auto decoded = decodeImagePreview(bytes, qBound(128,request.imageEdge,4096));
             if (!decoded.error.isEmpty()) return fail(decoded.error);
             result.originalSize = decoded.originalSize; result.image = decoded.image;
             result.kind = PreviewKind::Image; return result;
@@ -52,6 +69,7 @@ PreviewResult decode(const PreviewRequest &request, PdfRenderer &pdf, const std:
         if (!rendered.message.isEmpty()) return fail(rendered.message);
         result.image = rendered.image; result.originalSize = rendered.originalSize;
         result.pages = rendered.pages; result.page = rendered.page;
+        result.pdfDigest = rendered.digest; result.pdfPointSize = rendered.pointSize;
         if (!result.image.isNull()) result.kind = PreviewKind::Pdf;
         return result;
     }
@@ -96,6 +114,9 @@ PreviewWorker::PreviewWorker(QObject *parent) : QThread(parent) {}
 PreviewWorker::~PreviewWorker() { stop(); wait(); }
 quint64 PreviewWorker::submit(PreviewRequest request) {
     QMutexLocker lock(&m_mutex); request.serial = ++m_serial; m_pending = request; m_wake.wakeOne(); return request.serial;
+}
+quint64 PreviewWorker::cancelPending() {
+    QMutexLocker lock(&m_mutex); ++m_serial; m_pending.reset(); m_result.reset(); return m_serial.load();
 }
 void PreviewWorker::stop() {
     QMutexLocker lock(&m_mutex); m_stopping = true; ++m_serial; m_pending.reset(); m_result.reset(); m_wake.wakeOne();

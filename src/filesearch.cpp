@@ -1,9 +1,9 @@
 #include "filesearch.h"
 #include "windowspath.h"
+#include "searchquery.h"
+#include "everythingsearch.h"
 #include <QDir>
 #include <QElapsedTimer>
-#include <QFileInfo>
-#include <QRegularExpression>
 #include <filesystem>
 #include <vector>
 #include <windows.h>
@@ -18,26 +18,15 @@ bool isReparsePoint(const fs::path &path, std::error_code &error) {
 }
 }
 
-SearchSummary searchFiles(const SearchRequest &request, const std::atomic_bool &cancel, const SearchUpdate &update) {
-    SearchSummary summary;
+static SearchSummary searchDirect(const SearchRequest &request, const PreparedSearch &prepared, const std::atomic_bool &cancel,
+                                 const SearchUpdate &update, const QString &fallbackReason = {}) {
+    SearchSummary summary; summary.source = "Busca direta"; summary.fallbackReason = fallbackReason;
     auto recordError = [&](const QString &path, const QString &message) {
         ++summary.errors;
         if (summary.details.size() < 20) summary.details.append(QDir::toNativeSeparators(path) + ": " + message);
     };
-    if (request.name.trimmed().isEmpty() || request.name.size() > 1024 || request.name.contains(QChar(0))
-        || !QDir::isAbsolutePath(request.root) || request.root.contains(QChar(0))
-        || request.maxResults < 1 || request.maxResults > 10000 || request.maxVisited < 1 || request.maxVisited > 1000000) {
-        recordError(request.root, "Escolha uma pasta e um nome para buscar."); return summary;
-    }
     if (cancel) { summary.state = SearchState::Cancelled; return summary; }
-    const fs::path root(WindowsPath::forFileApi(request.root).toStdWString());
-    std::error_code error;
-    const bool rootLink = isReparsePoint(root, error);
-    if (error || rootLink || !fs::is_directory(root, error) || error) {
-        recordError(request.root, rootLink ? "Escolha a pasta de destino do link para buscar." : "A pasta não pôde ser acessada."); return summary;
-    }
-    const QRegularExpression pattern(request.wildcard ? QRegularExpression::wildcardToRegularExpression(request.name) : QString{}, QRegularExpression::CaseInsensitiveOption);
-    if (request.wildcard && !pattern.isValid()) { recordError(request.root, "Padrão de nome inválido."); return summary; }
+    const fs::path root(WindowsPath::forFileApi(prepared.root).toStdWString());
     struct Frame { fs::path path; fs::directory_iterator iterator; };
     std::vector<Frame> stack;
     auto enter = [&](const fs::path &path) {
@@ -68,8 +57,13 @@ SearchSummary searchFiles(const SearchRequest &request, const std::atomic_bool &
             const bool directory = entry.is_directory(ec);
             if (ec) recordError(displayPath(path), QString::fromStdString(ec.message()));
             else {
-                const bool matched = request.wildcard ? pattern.match(name).hasMatch() : name.contains(request.name, Qt::CaseInsensitive);
-                if (matched) { batch.append({displayPath(path), directory}); ++summary.matches; }
+                const auto shown = displayPath(path);
+                if (prepared.matches(prepared.matchPath ? QDir::toNativeSeparators(shown) : name)) {
+                    const SearchEntry candidate{shown, directory};
+                    const auto accepted = prepared.accepts(candidate);
+                    if (const auto *error = std::get_if<SearchFailure>(&accepted)) recordError(shown, error->message);
+                    else if (std::get<bool>(accepted)) { batch.append(candidate); ++summary.matches; }
+                }
                 if (summary.matches >= quint64(request.maxResults)) { summary.state = SearchState::Limited; break; }
                 if (directory) {
                     if (stack.size() >= 256) recordError(displayPath(path), "Limite de profundidade atingido; esta pasta não foi examinada.");
@@ -81,6 +75,22 @@ SearchSummary searchFiles(const SearchRequest &request, const std::atomic_bool &
     }
     if (summary.state == SearchState::Completed && summary.errors) summary.state = SearchState::Partial;
     flush(); return summary;
+}
+
+SearchSummary searchFiles(const SearchRequest &request, const std::atomic_bool &cancel, const SearchUpdate &update) {
+    if (cancel) { SearchSummary summary; summary.state = SearchState::Cancelled; return summary; }
+    const auto preparation = prepareSearch(request);
+    if (const auto *error = std::get_if<SearchFailure>(&preparation)) {
+        SearchSummary summary; summary.failure = *error; summary.errors = 1; summary.details = {error->message}; return summary;
+    }
+    const auto &prepared = std::get<PreparedSearch>(preparation);
+    if (request.engine == SearchEngine::Direct) return searchDirect(request, prepared, cancel, update);
+    const auto indexed = searchEverything(request, prepared, cancel, update);
+    if (request.engine == SearchEngine::Automatic && indexed.failure && indexed.matches == 0
+        && (indexed.failure->code == SearchErrorCode::Unavailable || indexed.failure->code == SearchErrorCode::NotReady
+            || indexed.failure->code == SearchErrorCode::Unsupported))
+        return searchDirect(request, prepared, cancel, update, indexed.failure->message);
+    return indexed;
 }
 
 SearchJob::SearchJob(SearchRequest request, QObject *parent) : QThread(parent), m_request(std::move(request)) {

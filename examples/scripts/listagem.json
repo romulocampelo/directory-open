@@ -1,0 +1,13 @@
+{
+  "format": "DirectoryOpen.Script",
+  "version": 1,
+  "title": "Exportar seleção para uma listagem",
+  "description": "Exemplo em Python: cria um arquivo de texto novo na pasta escolhida, sem substituir arquivos existentes.",
+  "script": "listagem.py",
+  "fields": [
+    {"id": "destination", "label": "Pasta de saída", "type": "folder", "required": true},
+    {"id": "name", "label": "Nome do arquivo novo", "type": "text", "default": "listagem.txt", "maxLength": 255, "required": true},
+    {"id": "sizes", "label": "Incluir tamanho dos arquivos", "type": "boolean", "default": true},
+    {"id": "order", "label": "Ordem", "type": "choice", "choices": ["Seleção", "Nome"], "default": "Seleção"}
+  ]
+}
