@@ -1,11 +1,31 @@
 # Directory Open — instruções de desenvolvimento
 
+O nome definitivo é **Directory Open**, forma curta **DirOpen** e executável
+**DirOpen.exe**. O nome antigo fica restrito a referências históricas e identificadores
+técnicos de compatibilidade. Se CONTEXTO.md local estiver presente, leia-o primeiro
+para retomar o estado atual; não o inclua em commits ou publicações.
+
 Aplicativo próprio para Windows em C++20/Qt Widgets. Consultar README.md,
 docs/COMPILAR.md, docs/ARQUITETURA.md e CONTRIBUTING.md conforme o escopo.
 Preservar recursos existentes, dados reais e compatibilidade de sessão/clipboard.
 
 - Trabalhar com fixtures e --no-session ou --session-file em verificações de GUI.
-- Modelos permanecem somente leitura; alterações passam pelo motor nativo e confirmação.
+- Modelos permanecem somente leitura; operações próprias passam pelo motor nativo e confirmação.
+  Cópia pode ser delegada, após confirmação, ao TeraCopy pela interface pública;
+  ele controla progresso/cancelamento/verificação. Encaminhamento não é conclusão.
+  Backup restic e cópia rclone usam specializedtools com confirmação na toolsdialog,
+  processo/família supervisionados, erros parciais e cancelamento aguardado.
+  Restaurar somente em pasta nova com verificação; rclone copy somente com prévia
+  e --immutable, sem propagar exclusões. Não persistir senhas nem importar credenciais.
+  Metadados/conversões usam mediatools e confirmação na mediatoolsdialog: cópias
+  em pasta nova, revalidação sob bloqueio, verificação e publicação sem substituir.
+  Preservar originais/Zone.Identifier e relatar parciais/limpeza pendente.
+  Compactados ZIP/7z usam 7z.exe supervisionado após confirmação. Extração grava
+  somente fluxos por arquivo em pasta nova; nunca chamar extração direta com -o
+  em caminhos do usuário. Reservar diretórios normais por handle, não só por texto;
+  preservar Zone.Identifier. Só publicar compactado/arquivo após sucesso verificado.
+  O menu Shell pode delegar ações explicitamente escolhidas a programas externos,
+  que controlam alterações/confirmações e não participam do histórico de lotes.
 - Lixeira não tem alternativa de exclusão definitiva. Não remover itens do aplicativo
   de origem depois de um arraste já movido pelo motor.
 - Identidade, ausência, resultado parcial e erro são diferentes. Não reinterpretar
@@ -15,10 +35,14 @@ Preservar recursos existentes, dados reais e compatibilidade de sessão/clipboar
 - Não ler clipboard dentro de dataChanged. Conservar tokens e sequência nativa.
 - Mudanças de configuração devem ser aditivas, idempotentes e com backup.
 - Executar checks relevantes; descrever cobertura e omissões reais. Mocks não provam
-  comportamento de Windows.Data.Pdf, IFileOperation ou clipboard nativo.
+  comportamento de Qt PDF, IFileOperation ou clipboard nativo.
 - Medir tempo/CPU/pico de memória em mudanças de desempenho; rotular frio/aquecido,
   estimativas e custos não medidos. Não generalizar a partir de bytes ou um único caso.
 - Atualizar documentação/changelog na etapa adequada. Usar Conventional Commits.
+- A cada entrega local validada, atualizar IniciarDirOpen.cmd para o executável
+  mais recente, inclusive quando estiver em outra pasta de build. O usuário usa
+  esse inicializador como teste no mundo real; não deixá-lo apontando para versão
+  antiga. Preservar sessões/janelas abertas e encaminhar os argumentos recebidos.
 - Não versionar builds, executáveis, bibliotecas, credenciais, sessões pessoais ou
   artefatos de investigação locais. Capturas de documentação usam dados de demonstração.
 - Não copiar código/imagens/licença/configuração do Directory Opus.

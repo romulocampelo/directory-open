@@ -1,4 +1,5 @@
 #include "fileoperation.h"
+#include "teracopy.h"
 #include <QDir>
 #include <QDirIterator>
 #include <QFileInfo>
@@ -170,6 +171,9 @@ QString operationLabel(OperationKind kind) {
     }
     return {};
 }
+QString operationItemLabel(OperationItemState state){
+    switch(state){case OperationItemState::Completed:return "Concluído";case OperationItemState::Cancelled:return "Cancelado";case OperationItemState::Failed:return "Erro";case OperationItemState::Incomplete:return "Parcial / não confirmado";case OperationItemState::Delegated:return "Encaminhado — conferir ferramenta";case OperationItemState::NotStarted:return "Não iniciado";case OperationItemState::Skipped:return "Ignorado";}return {};
+}
 QString validateItemName(const QString &name) {
     if (name.isEmpty() || name == "." || name == "..") return "Informe um nome para o item.";
     if (name.size() > 255 || name.endsWith(' ') || name.endsWith('.')) return "O nome é longo demais ou termina com espaço ou ponto.";
@@ -179,6 +183,12 @@ QString validateItemName(const QString &name) {
     return {};
 }
 QString validateOperationRequest(const OperationRequest &request) {
+    if (request.engine == TransferEngine::TeraCopy) {
+        if (request.kind != OperationKind::Copy) return "A integração TeraCopy desta versão aceita apenas cópia. Use Windows para as outras operações.";
+        if (request.conflict != OperationConflict::KeepBoth) return "Com TeraCopy, use Manter os dois para preservar arquivos existentes.";
+        for (const auto &path : request.sources + QStringList{request.destination})
+            for (const auto ch : path) if (ch.unicode() < 32) return "Um caminho contém um caractere incompatível com a lista do TeraCopy.";
+    }
     const bool transfer = request.kind == OperationKind::Copy || request.kind == OperationKind::Move;
     const bool named = request.kind == OperationKind::Rename || request.kind == OperationKind::CreateFolder;
     if (named) { const auto error = validateItemName(request.name); if (!error.isEmpty()) return error; }
@@ -235,24 +245,31 @@ QString validateOperationRequest(const OperationRequest &request) {
     return {};
 }
 
-OperationResult performOperation(const OperationRequest &request, const std::atomic_bool &cancel, const OperationProgress &progress) {
-    OperationResult result;
-    for (const auto &source : request.sources) result.items.append({normalized(QFileInfo(source).absoluteFilePath()), {}, OperationItemState::NotStarted, {}, {}});
-    if (request.kind == OperationKind::CreateFolder)
-        result.items.append({normalized(QDir(request.destination).filePath(request.name)), {}, OperationItemState::NotStarted, {}, {}});
-    if (cancel.load()) { result.state = OperationState::Cancelled; return result; }
-    result.error = validateOperationRequest(request); if (!result.error.isEmpty()) return result;
+QString validateOperationTree(const OperationRequest &request, const std::atomic_bool &cancel, const OperationProgress &progress) {
     // Validate nested links before queueing writes. Enumeration never follows links.
     for (const auto &source : request.sources) {
         if (!QFileInfo(source).isDir() || request.kind == OperationKind::Rename) continue;
         if (progress) progress(0, 0, source);
         QDirIterator entries(source, QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System, QDirIterator::Subdirectories);
         while (entries.hasNext()) {
-            if (cancel.load()) { result.state = OperationState::Cancelled; return result; }
+            if (cancel.load()) return {};
             entries.next(); const auto info = entries.fileInfo();
-            if (info.isSymLink() || info.isJunction()) { result.error = "A seleção contém um link ou junção não suportado: " + info.absoluteFilePath(); return result; }
+            if (info.isSymLink() || info.isJunction()) return "A seleção contém um link ou junção não suportado: " + info.absoluteFilePath();
         }
     }
+    return {};
+}
+
+OperationResult performOperation(const OperationRequest &request, const std::atomic_bool &cancel, const OperationProgress &progress) {
+    if (request.engine == TransferEngine::TeraCopy) return dispatchTeraCopy(request, cancel, progress);
+    OperationResult result;
+    for (const auto &source : request.sources) result.items.append({normalized(QFileInfo(source).absoluteFilePath()), {}, OperationItemState::NotStarted, {}, {}});
+    if (request.kind == OperationKind::CreateFolder)
+        result.items.append({normalized(QDir(request.destination).filePath(request.name)), {}, OperationItemState::NotStarted, {}, {}});
+    if (cancel.load()) { result.state = OperationState::Cancelled; return result; }
+    result.error = validateOperationRequest(request); if (!result.error.isEmpty()) return result;
+    result.error = validateOperationTree(request, cancel, progress);
+    if (!result.error.isEmpty()) return result;
     if (cancel.load()) { result.state = OperationState::Cancelled; return result; }
     const HRESULT initialized = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
     if (FAILED(initialized)) { result.error = errorText(initialized); return result; }

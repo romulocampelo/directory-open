@@ -6,10 +6,12 @@
 #include <QWaitCondition>
 #include <optional>
 #include <atomic>
+#include "pdfrenderer.h"
 
-enum class PreviewKind { Empty, Image, Text, Pdf, Error, Media };
+enum class PreviewKind { Empty, Image, Text, Pdf, Error, Media,Document };
+inline bool hasTextPreview(PreviewKind kind){return kind==PreviewKind::Text||kind==PreviewKind::Document;}
 enum class PreviewEncoding { Auto, Utf8, Utf16LE, Utf16BE, Windows1252, Latin1 };
-struct PreviewRequest { QString path; int page = 0; PreviewEncoding encoding = PreviewEncoding::Auto; quint64 serial = 0; };
+struct PreviewRequest { QString path; int page = 0; PreviewEncoding encoding = PreviewEncoding::Auto; quint64 serial = 0; PdfTextRequest pdfText; int imageEdge=4096; };
 struct PreviewResult {
     PreviewKind kind = PreviewKind::Empty;
     QString path, text, encoding, message;
@@ -18,6 +20,10 @@ struct PreviewResult {
     int page = 0, pages = 0;
     quint64 serial = 0;
     bool truncated = false, textCandidate = false;
+    QByteArray pdfDigest;
+    QSizeF pdfPointSize;
+    bool pdfInteraction = false;
+    PdfTextResult pdfText;
 };
 
 // One persistent worker and one replaceable pending request. Native decoding
@@ -28,6 +34,7 @@ public:
     explicit PreviewWorker(QObject *parent = nullptr);
     ~PreviewWorker() override;
     quint64 submit(PreviewRequest request);
+    quint64 cancelPending();
     void stop();
     std::optional<PreviewResult> takeResult();
 signals:

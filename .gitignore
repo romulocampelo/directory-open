@@ -1,4 +1,5 @@
 /build/
+/tools/
 /build-*/
 /validation/
 /.cache/
@@ -11,3 +12,9 @@
 !.env.example
 Thumbs.db
 .DS_Store
+
+# Histórico local de nomes/caminhos, inclusive sessões de teste
+*.rename-history/
+
+# Handoff local, sem dados de produto para publicacao
+/CONTEXTO*.md

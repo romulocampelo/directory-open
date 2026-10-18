@@ -1,11 +1,18 @@
 #include "batchrename.h"
 #include "batchrenamedialog.h"
+#include "renamerecipedialog.h"
 #include "mainwindow.h"
 #include "filepanel.h"
 #include <QAbstractItemView>
 #include <QAction>
 #include <QCheckBox>
 #include <QDateEdit>
+#include <QDialogButtonBox>
+#include <QComboBox>
+#include <QJsonObject>
+#include <QJsonArray>
+#include <QListWidget>
+#include <QScopeGuard>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
@@ -28,6 +35,20 @@ class BatchRenameTest final : public QObject {
     BatchRenamePlan plan(const QStringList &paths, BatchRenameOptions options = {}) { std::atomic_bool cancel{false}; return planBatchRename(paths, options, cancel); }
     OperationResult apply(const BatchRenamePlan &preview) { std::atomic_bool cancel{false}; return performBatchRename(preview, cancel); }
 private slots:
+    void recipeOrderUnicodeBoundsAndFilesShareThePreviewEngine(){
+        RenameRecipe recipe;recipe.name="Viagem";recipe.rules={{RenameRuleKind::Prefix,"Viagem_"},{RenameRuleKind::Replace,"2026","2027"},{RenameRuleKind::Upper}};QCOMPARE(applyRenameRules("relatorio_2026",recipe.rules).text,QString("VIAGEM_RELATORIO_2027"));
+        QCOMPARE(applyRenameRules(QString::fromUtf8("a😀bc"),{{RenameRuleKind::Slice,{},{},2,1}}).text,QString::fromUtf8("😀"));QVERIFY(applyRenameRules("x",{{RenameRuleKind::Prefix,QString(255,'a')}}).error.contains("255"));QVERIFY(!validateRenameRules(QVector<RenameRule>(17)).isEmpty());
+        QTemporaryDir root;const auto source=root.filePath("relatorio_2026.txt");write(source);BatchRenameOptions options;options.pattern="{name}";options.recipe=recipe;const auto preview=plan({source},options);QVERIFY2(preview.valid(),qPrintable(preview.error));QCOMPARE(preview.items.first().name,QString("VIAGEM_RELATORIO_2027.txt"));QVERIFY(QFileInfo::exists(source));const auto result=apply(preview);QCOMPARE(result.state,OperationState::Completed);QVERIFY(QFileInfo::exists(root.filePath("VIAGEM_RELATORIO_2027.txt")));
+        const auto a=root.filePath("a1.txt"),b=root.filePath("a2.txt");write(a);write(b);options.recipe.rules={{RenameRuleKind::Slice,{},{},1,1}};QVERIFY(!plan({a,b},options).valid());QVERIFY(QFileInfo::exists(a));QVERIFY(QFileInfo::exists(b));
+    }
+    void recipesPersistStrictlyWithBackupAndImportNeverRenames(){
+        QTemporaryDir root;const auto path=root.filePath("recipe.json");RenameRecipe recipe;recipe.name="Prefixo";recipe.rules={{RenameRuleKind::Prefix,"revisado_"}};QVERIFY(saveRenameRecipe(path,recipe).isEmpty());QCOMPARE(readRenameRecipe(path).recipe,recipe);recipe.rules.append({RenameRuleKind::Lower});QVERIFY(saveRenameRecipe(path,recipe).isEmpty());QVERIFY(QFileInfo::exists(path+".bak"));const auto prior=readRenameRecipe(path+".bak").recipe;QCOMPARE(prior.rules.size(),1);QVERIFY(saveRenameRecipe(path,recipe).isEmpty());QCOMPARE(readRenameRecipe(path+".bak").recipe,prior);
+        auto invalid=encodeRenameRecipe(recipe);auto rules=invalid["rules"].toArray();auto first=rules[0].toObject();first["start"]=1.5;rules[0]=first;invalid["rules"]=rules;QVERIFY(!decodeRenameRecipe(invalid));first["start"]=1;first["kind"]="execute";rules[0]=first;invalid["rules"]=rules;QVERIFY(!decodeRenameRecipe(invalid));
+    }
+    void recipeEditorStagesAndInvalidatesBatchConfirmation(){
+        QTemporaryDir root;const auto source=root.filePath("nota.txt");write(source);BatchRenameDialog dialog({source});dialog.show();auto *preview=dialog.findChild<QPushButton*>("previewBatchRename");QTRY_VERIFY(preview->isEnabled());
+        QTimer::singleShot(0,&dialog,[&]{auto *d=dialog.findChild<RenameRecipeDialog*>("renameRecipeDialog");QVERIFY(d);auto close=qScopeGuard([d]{if(d->isVisible())d->reject();});d->findChild<QLineEdit*>("recipeName")->setText("Revisão");d->findChild<QLineEdit*>("recipeText")->setText("novo_");d->findChild<QPushButton*>("addRecipeStep")->click();QCOMPARE(d->findChild<QListWidget*>("recipeSteps")->count(),1);const auto out=qEnvironmentVariable("DIROPEN_RECIPE_CAPTURES");if(!out.isEmpty()){QVERIFY(QDir().mkpath(out));QVERIFY(d->grab().save(out+"/rename-recipe.png"));}d->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Ok)->click();});dialog.findChild<QPushButton*>("editRenameRecipe")->click();QVERIFY(!dialog.findChild<QCheckBox*>("confirmBatchRename")->isChecked());QVERIFY(!dialog.findChild<QPushButton*>("applyBatchRename")->isEnabled());dialog.findChild<QLineEdit*>("renamePattern")->setText("{name}");preview->click();QTRY_VERIFY(preview->isEnabled());QCOMPARE(dialog.findChild<QTreeWidget*>("batchRenameRows")->topLevelItem(0)->text(2),QString("novo_nota.txt"));QVERIFY(QFileInfo::exists(source));QMetaObject::invokeMethod(&dialog,"reject");QVERIFY(QFileInfo::exists(source));
+    }
     void numberedReplacementDatesAndExtensionsRespectInputOrder() {
         QTemporaryDir fixture; QVERIFY(fixture.isValid()); const auto a = fixture.filePath("férias-final.txt"), b = fixture.filePath("foto.jpg"); write(a); write(b);
         BatchRenameOptions options; options.pattern = "{date}_{name}_{n}"; options.find = "final"; options.replacement = "revisto"; options.start = 7; options.step = 2; options.digits = 4; options.dateSource = RenameDateSource::Fixed; options.fixedDate = QDate(2027, 1, 3);

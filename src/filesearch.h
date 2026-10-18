@@ -4,12 +4,23 @@
 #include <QVector>
 #include <atomic>
 #include <functional>
+#include <optional>
+#include "folderpresentation.h"
+
+enum class SearchEngine { Direct, Everything, Automatic };
+enum class SearchErrorCode { InvalidRequest, Unavailable, NotReady, Unsupported, Timeout, Protocol, Access, Internal };
+struct SearchFailure { SearchErrorCode code; QString message; };
 
 struct SearchRequest {
     QString root, name;
     bool wildcard = false;
     int maxResults = 10000;
     quint64 maxVisited = 1000000;
+    SearchEngine engine = SearchEngine::Direct;
+    QString everythingInstance;
+    int timeoutMs = 5000;
+    bool matchPath = false;
+    FolderRules filters;
 };
 struct SearchEntry { QString path; bool directory = false; };
 enum class SearchState { Completed, Cancelled, Limited, Partial, Failed };
@@ -17,6 +28,11 @@ struct SearchSummary {
     SearchState state = SearchState::Failed;
     quint64 visited = 0, matches = 0, skippedLinks = 0, errors = 0;
     QStringList details;
+    SearchEngine engine = SearchEngine::Direct;
+    QString source;
+    QString fallbackReason;
+    std::optional<quint64> indexedTotal;
+    std::optional<SearchFailure> failure;
 };
 using SearchUpdate = std::function<void(const QVector<SearchEntry> &, const SearchSummary &)>;
 SearchSummary searchFiles(const SearchRequest &, const std::atomic_bool &cancel, const SearchUpdate &update);

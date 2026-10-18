@@ -14,5 +14,6 @@ private:
     QLineEdit *m_destination = nullptr;
     QLineEdit *m_name = nullptr;
     QComboBox *m_conflict = nullptr;
+    QComboBox *m_engine = nullptr;
     QLabel *m_error;
 };

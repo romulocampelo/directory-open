@@ -15,8 +15,23 @@ arquivos, explique se houve erro, cancelamento ou resultado parcial.
 
 1. Crie uma branch para a mudança e mantenha o escopo pequeno.
 2. Preserve recursos existentes, sessões legadas e caminhos indisponíveis.
-3. Alterações de arquivos passam pelo motor nativo e pela confirmação. Os modelos
+3. Operações próprias de arquivos passam pelo motor nativo e pela confirmação. Os modelos
    ficam somente leitura; cancelamento não desfaz itens já concluídos.
+   Comandos explicitamente escolhidos no menu do Shell podem ser delegados ao
+   Windows ou a extensões, com execução/confirmações externas e sem histórico próprio.
+   Cópia TeraCopy pode ser delegada explicitamente, sem presumir conclusão.
+   Backup restic e cópia rclone têm confirmação própria na toolsdialog e família
+   de processos supervisionada no adaptador specializedtools. Restaurar em pasta
+   nova com verificação; rclone somente copy com prévia e proteção --immutable.
+   Senhas não pertencem à sessão, aos argumentos, aos logs ou ao Git.
+   ExifTool/ImageMagick/FFmpeg passam por mediatools e confirmação da prévia;
+   somente saídas novas, originais preservados, origem revalidada sob bloqueio,
+   marca de origem preservada e publicação após verificação. Limpeza pendente é
+   reportada com caminho; não ampliar esse contrato para edição direta silenciosa.
+   ZIP/7z usam o adaptador archive com processo supervisionado e escrita de fluxos
+   por arquivo em destino novo. Não trocar esse fluxo por extração direta `-o`
+   em dados do usuário; conservar validação de nomes, reserva dos diretórios,
+   marca de origem e publicação sem substituição.
 4. Teste com fixtures e --no-session ou --session-file. Não usar documentos ou
    sessões pessoais para testar copiar/mover/Lixeira.
 5. Execute as verificações relevantes de [COMPILAR.md](docs/COMPILAR.md). Para

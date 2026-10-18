@@ -1,0 +1,18 @@
+#include "ocrdialog.h"
+#include <QApplication>
+#include <QClipboard>
+#include <QComboBox>
+#include <QDialogButtonBox>
+#include <QLabel>
+#include <QPlainTextEdit>
+#include <QPushButton>
+#include <QVBoxLayout>
+OcrDialog::OcrDialog(QImage preview,QString source,QWidget*parent):QDialog(parent),m_image(std::move(preview)){
+    setObjectName("ocrDialog");setWindowTitle(tr("Reconhecer texto — OCR do Windows"));resize(900,680);auto *root=new QVBoxLayout(this);auto *hint=new QLabel(tr("Reconhece somente a imagem ou página atualmente exibida na prévia. O processamento usa o OCR instalado do Windows; o DirOpen não envia a imagem a um serviço. A prévia pode estar reduzida. Confira o texto reconhecido antes de usar."),this);hint->setWordWrap(true);root->addWidget(hint);auto *origin=new QLabel(source,this);origin->setTextFormat(Qt::PlainText);origin->setWordWrap(true);root->addWidget(origin);
+    m_language=new QComboBox(this);m_language->setObjectName("ocrLanguage");m_language->addItem(tr("Automático — idiomas do Windows"),QString{});root->addWidget(m_language);m_text=new QPlainTextEdit(this);m_text->setObjectName("ocrText");m_text->setReadOnly(true);root->addWidget(m_text,1);m_status=new QLabel(this);m_status->setTextFormat(Qt::PlainText);m_status->setWordWrap(true);m_status->setObjectName("ocrStatus");root->addWidget(m_status);auto *buttons=new QDialogButtonBox(this);root->addWidget(buttons);m_start=buttons->addButton(tr("Reconhecer texto"),QDialogButtonBox::ActionRole);m_start->setObjectName("startOcr");m_cancel=buttons->addButton(tr("Cancelar trabalho"),QDialogButtonBox::ActionRole);m_copy=buttons->addButton(tr("Copiar texto"),QDialogButtonBox::ActionRole);m_copy->setObjectName("copyOcrText");m_copy->setEnabled(false);buttons->addButton(tr("Fechar"),QDialogButtonBox::RejectRole);connect(buttons,&QDialogButtonBox::rejected,this,&OcrDialog::reject);connect(m_start,&QPushButton::clicked,this,[this]{start(false);});connect(m_cancel,&QPushButton::clicked,this,[this]{if(m_job){m_job->cancel();m_cancel->setEnabled(false);m_status->setText(tr("Aguardando o OCR encerrar…"));}});connect(m_copy,&QPushButton::clicked,this,[this]{qApp->clipboard()->setText(m_text->toPlainText());});start(true);
+}
+OcrDialog::~OcrDialog(){if(m_job){m_job->cancel();m_job->wait();}}
+void OcrDialog::reject(){if(m_job){m_closing=true;m_job->cancel();m_status->setText(tr("Aguardando o OCR encerrar…"));return;}QDialog::reject();}
+void OcrDialog::start(bool languages){
+    if(m_job)return;m_language->setEnabled(false);m_start->setEnabled(false);m_copy->setEnabled(false);m_cancel->setEnabled(true);m_status->setText(languages?tr("Consultando os idiomas instalados…"):tr("Reconhecendo a prévia…"));if(!languages)m_text->clear();m_job=new OcrJob({languages?QImage{}:m_image,m_language->currentData().toString(),languages},this);connect(m_job,&QThread::finished,this,[this,languages]{m_job->wait();auto result=m_job->takeResult();m_job->deleteLater();m_job=nullptr;m_cancel->setEnabled(false);m_language->setEnabled(true);m_start->setEnabled(!result.languages.isEmpty()&&!m_image.isNull());if(languages){for(const auto &id:result.languages)m_language->addItem(id,id);m_status->setText(result.state==OcrState::Completed?tr("Escolha um idioma e reconheça a prévia."):result.message);}else{m_text->setPlainText(result.text);m_copy->setEnabled(!result.text.isEmpty());m_status->setText(result.message+tr("\nIdioma: %1. Imagem: %2 × %3%4.").arg(result.language).arg(result.recognizedSize.width()).arg(result.recognizedSize.height()).arg(result.reduced?tr(" — reduzida para reconhecimento"):QString{}));}if(m_closing)QDialog::reject();});m_job->start();
+}

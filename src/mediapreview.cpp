@@ -1,4 +1,5 @@
 #include "mediapreview.h"
+#include "mediatypes.h"
 #include <QAudioOutput>
 #include <QFile>
 #include <QFileInfo>
@@ -21,8 +22,7 @@ QString clockText(qint64 ms) {
 }
 }
 bool MediaPreview::accepts(const QString &path) {
-    static const QSet<QString> extensions{"mp3","wav","flac","ogg","opus","aac","m4a","wma","mp4","m4v","mov","mkv","webm","avi","wmv","mpg","mpeg","ts","3gp"};
-    return extensions.contains(QFileInfo(path).suffix().toLower());
+    return mediaKindForPath(path) != MediaKind::None;
 }
 MediaPreview::MediaPreview(QWidget *parent) : QWidget(parent) {
     setObjectName("mediaPreview"); auto *layout = new QVBoxLayout(this); layout->setContentsMargins(0, 0, 0, 0);

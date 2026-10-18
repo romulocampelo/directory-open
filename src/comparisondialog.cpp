@@ -39,7 +39,7 @@ ComparisonDialog::ComparisonDialog(const QString &left, const QString &right, QW
     buttons->addWidget(m_start); buttons->addWidget(m_cancel); buttons->addStretch(); layout->addLayout(buttons);
     m_results = new QTreeWidget(this); m_results->setObjectName("comparisonResults"); m_results->setColumnCount(4);
     m_results->setHeaderLabels({tr("Caminho relativo"), tr("Resultado"), tr("Esquerda"), tr("Direita")});
-    m_results->setRootIsDecorated(false); m_results->setUniformRowHeights(true); m_results->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_results->setRootIsDecorated(false); m_results->setUniformRowHeights(true); m_results->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_results->setEditTriggers(QAbstractItemView::NoEditTriggers); m_results->header()->setStretchLastSection(false);
     m_results->header()->setSectionResizeMode(0, QHeaderView::Stretch); m_results->setColumnWidth(1, 310); m_results->setColumnWidth(2, 210); m_results->setColumnWidth(3, 210);
     layout->addWidget(m_results, 1);
@@ -48,8 +48,11 @@ ComparisonDialog::ComparisonDialog(const QString &left, const QString &right, QW
     auto *footer = new QHBoxLayout; m_openLeft = new QPushButton(tr("Abrir à esquerda em nova aba"), this); m_openLeft->setObjectName("openComparisonLeft");
     m_openRight = new QPushButton(tr("Abrir à direita em nova aba"), this); m_openRight->setObjectName("openComparisonRight");
     m_openLeft->setEnabled(false); m_openRight->setEnabled(false);
+    m_synchronize=new QPushButton(tr("Preparar sincronização…"),this);m_synchronize->setObjectName("prepareSynchronization");m_synchronize->setEnabled(false);
     auto *close = new QPushButton(tr("Fechar"), this); close->setObjectName("closeComparison");
-    footer->addWidget(m_openLeft); footer->addWidget(m_openRight); footer->addStretch(); footer->addWidget(close); layout->addLayout(footer);
+    footer->addWidget(m_openLeft); footer->addWidget(m_openRight);footer->addWidget(m_synchronize); footer->addStretch(); footer->addWidget(close); layout->addLayout(footer);
+    connect(m_synchronize,&QPushButton::clicked,this,[this]{updateSynchronization();if(!m_synchronize->isEnabled())return;QVector<ComparisonEntry> entries;auto rows=m_results->selectedItems();if(rows.isEmpty())for(int i=0;i<m_results->topLevelItemCount();++i)if(!m_results->topLevelItem(i)->isHidden())rows.append(m_results->topLevelItem(i));for(const auto *row:rows){if(row->isHidden())continue;bool ok=false;const int index=row->data(0,Qt::UserRole+3).toInt(&ok);if(!ok||index<0||index>=m_report.entries.size()){m_status->setText(tr("Seleção inconsistente. Compare novamente."));return;}entries.append(m_report.entries[index]);}if(entries.isEmpty())return;emit synchronizeRequested(m_comparedRequest.left,m_comparedRequest.right,entries);m_reportStale=true;updateSynchronization();m_status->setText(tr("Faça outra comparação para atualizar os resultados antes de preparar outro plano."));});
+    const auto stale=[this]{m_reportStale=true;updateSynchronization();};connect(m_left,&QLineEdit::textChanged,this,stale);connect(m_right,&QLineEdit::textChanged,this,stale);connect(m_recursive,&QCheckBox::toggled,this,stale);connect(m_content,&QCheckBox::toggled,this,stale);
     connect(m_start, &QPushButton::clicked, this, &ComparisonDialog::startComparison);
     connect(m_cancel, &QPushButton::clicked, this, [this] {
         if (m_job) { m_cancelRequested = true; m_job->cancel(); m_cancel->setEnabled(false); m_status->setText(tr("Cancelamento solicitado; aguardando a leitura em curso…")); }
@@ -78,6 +81,7 @@ void ComparisonDialog::startComparison() {
     if (m_job) return;
     ComparisonRequest request; request.left = QDir::fromNativeSeparators(m_left->text()); request.right = QDir::fromNativeSeparators(m_right->text());
     request.recursive = m_recursive->isChecked(); request.content = m_content->isChecked();
+    m_comparedRequest=request;m_reportStale=true;m_synchronize->setEnabled(false);
     m_report = {}; m_results->setSortingEnabled(false); m_results->clear(); m_cancelRequested = false;
     m_openLeft->setEnabled(false); m_openRight->setEnabled(false); m_status->setText(tr("Comparando…"));
     for (auto *widget : QList<QWidget *>{m_start, m_left, m_right, m_leftBrowse, m_rightBrowse, m_recursive, m_content}) widget->setEnabled(false);
@@ -85,7 +89,7 @@ void ComparisonDialog::startComparison() {
     connect(m_job, &QThread::finished, this, [this] {
         m_timer->stop(); m_job->wait(); m_report = m_job->takeReport(); m_job->deleteLater(); m_job = nullptr;
         for (auto *widget : QList<QWidget *>{m_start, m_left, m_right, m_leftBrowse, m_rightBrowse, m_recursive, m_content}) widget->setEnabled(true);
-        m_cancel->setEnabled(false); showReport();
+        m_cancel->setEnabled(false);m_reportStale=false; showReport();updateSynchronization();
         if (m_closeWhenFinished) QDialog::reject();
     });
     m_timer->start(); m_job->start();
@@ -93,9 +97,10 @@ void ComparisonDialog::startComparison() {
 void ComparisonDialog::showReport() {
     int only = 0, different = 0, equal = 0, candidates = 0, unknown = 0;
     m_results->setUpdatesEnabled(false);
-    for (const auto &entry : m_report.entries) {
+    for (int index=0;index<m_report.entries.size();++index) {const auto &entry=m_report.entries[index];
         auto *item = new QTreeWidgetItem(m_results, {entry.relativePath, comparisonLabel(entry.kind), entry.leftDescription, entry.rightDescription});
         item->setData(0, Qt::UserRole, entry.leftPath); item->setData(0, Qt::UserRole + 1, entry.rightPath); item->setData(0, Qt::UserRole + 2, int(entry.kind));
+        item->setData(0,Qt::UserRole+3,index);
         item->setToolTip(0, QDir::toNativeSeparators(entry.leftPath) + '\n' + QDir::toNativeSeparators(entry.rightPath));
         for (int column = 1; column < 4; ++column) item->setToolTip(column, entry.detail);
         switch (entry.kind) {
@@ -139,3 +144,4 @@ void ComparisonDialog::openFolder(bool left) {
     if (!QFileInfo(folder).isDir()) { m_status->setText(tr("A pasta deste resultado não está mais disponível. Compare novamente.")); return; }
     emit openFolderRequested(folder, left);
 }
+void ComparisonDialog::updateSynchronization(){m_synchronize->setEnabled(!m_job&&!m_reportStale&&m_report.state==ComparisonState::Completed&&!m_report.entries.isEmpty()&&QDir::fromNativeSeparators(m_left->text())==m_comparedRequest.left&&QDir::fromNativeSeparators(m_right->text())==m_comparedRequest.right&&m_recursive->isChecked()==m_comparedRequest.recursive&&m_content->isChecked()==m_comparedRequest.content);}

@@ -8,13 +8,16 @@ class QTreeWidget; class QLabel; class QPushButton; class QTimer;
 class BatchRenameDialog final : public QDialog {
     Q_OBJECT
 public:
-    explicit BatchRenameDialog(QStringList sources, QWidget *parent = nullptr);
+    explicit BatchRenameDialog(QStringList sources, QWidget *parent = nullptr, QString historyRoot = {});
     ~BatchRenameDialog() override;
     bool applied() const { return m_applied; }
 protected:
     void reject() override;
 private:
     QStringList m_sources;
+    QString m_historyRoot;
+    RenameRecipe m_recipe;
+    QPushButton *m_recipeButton;
     QHash<QString, QTreeWidgetItem *> m_rows;
     QLineEdit *m_pattern, *m_find, *m_replace;
     QCheckBox *m_extension, *m_case, *m_confirm;
